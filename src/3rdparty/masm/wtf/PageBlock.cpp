@@ -26,7 +26,7 @@
 #include "config.h"
 #include "PageBlock.h"
 
-#if OS(UNIX)
+#if OS(UNIXLIKE)
 #include <unistd.h>
 #endif
 
@@ -40,7 +40,7 @@ namespace WTF {
 static size_t s_pageSize;
 static size_t s_pageMask;
 
-#if OS(UNIX)
+#if OS(UNIXLIKE)
 
 inline size_t systemPageSize()
 {
