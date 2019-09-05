@@ -1,4 +1,5 @@
 TARGET = qmldbg_local
+os2:TARGET_SHORT = qmldl
 QT = qml-private
 
 SOURCES += \

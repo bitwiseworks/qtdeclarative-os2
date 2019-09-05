@@ -1,4 +1,5 @@
 TEMPLATE = lib
+os2:TARGET_SHORT = nestp
 CONFIG += nestedPlugin
 SOURCES = nestedPlugin.cpp
 QT = core qml

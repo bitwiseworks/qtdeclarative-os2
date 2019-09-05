@@ -1,4 +1,5 @@
 TARGET = qmldbg_native
+os2:TARGET_SHORT = qmldn
 QT = qml-private core-private packetprotocol-private
 
 HEADERS += \

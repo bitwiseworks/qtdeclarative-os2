@@ -1,4 +1,5 @@
 TARGET = QtQuickWidgets
+os2:TARGET_SHORT = QtQWgt
 
 QT = core-private gui-private qml-private quick-private widgets-private
 

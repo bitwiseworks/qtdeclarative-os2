@@ -1,4 +1,5 @@
 TARGET     = QtQuickTest
+os2:TARGET_SHORT = QtQTst
 
 QMAKE_DOCS = $$PWD/doc/qtqmltest.qdocconf
 

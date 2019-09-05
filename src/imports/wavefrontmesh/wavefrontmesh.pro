@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET  = qmlwavefrontmeshplugin
+os2:TARGET_SHORT = qmlwfmp
 TARGETPATH = Qt/labs/wavefrontmesh
 IMPORT_VERSION = 1.$$QT_MINOR_VERSION
 

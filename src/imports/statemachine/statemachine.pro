@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET = qtqmlstatemachine
+os2:TARGET_SHORT = qmlsm
 TARGETPATH = QtQml/StateMachine
 IMPORT_VERSION = 1.$$QT_MINOR_VERSION
 

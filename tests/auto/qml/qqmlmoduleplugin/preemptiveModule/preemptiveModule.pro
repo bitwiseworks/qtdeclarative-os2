@@ -1,4 +1,5 @@
 TEMPLATE = lib
+os2:TARGET_SHORT = prem
 CONFIG += plugin
 SOURCES = plugin.cpp
 QT = core qml

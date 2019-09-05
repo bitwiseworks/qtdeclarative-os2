@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET  = qquicklayoutsplugin
+os2:TARGET_SHORT = qqlp
 TARGETPATH = QtQuick/Layouts
 IMPORT_VERSION = 1.$$QT_MINOR_VERSION
 

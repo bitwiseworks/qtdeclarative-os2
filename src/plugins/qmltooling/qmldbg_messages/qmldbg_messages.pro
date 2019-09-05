@@ -1,4 +1,5 @@
 TARGET = qmldbg_messages
+os2:TARGET_SHORT = qmldm
 QT = qml-private core packetprotocol-private
 
 SOURCES += \

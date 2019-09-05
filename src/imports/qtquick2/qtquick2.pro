@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET  = qtquick2plugin
+os2:TARGET_SHORT = qtq2p
 TARGETPATH = QtQuick.2
 IMPORT_VERSION = 2.$$QT_MINOR_VERSION
 

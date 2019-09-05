@@ -1,6 +1,7 @@
 QT += core-private qml-private packetprotocol-private network quick-private gui-private
 
 TARGET = qmldbg_preview
+os2:TARGET_SHORT = qmldpv
 
 SOURCES += \
     $$PWD/qqmlpreviewblacklist.cpp \

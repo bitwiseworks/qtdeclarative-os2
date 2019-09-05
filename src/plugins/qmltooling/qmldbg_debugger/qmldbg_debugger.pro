@@ -1,4 +1,5 @@
 TARGET = qmldbg_debugger
+os2:TARGET_SHORT = qmldd
 QT = qml-private core-private packetprotocol-private
 
 SOURCES += \

@@ -1,4 +1,5 @@
 TARGET = QtQuick
+os2:TARGET_SHORT = QtQ
 
 QT = core-private gui-private qml-private
 qtConfig(qml-network): \

@@ -1,5 +1,6 @@
 TEMPLATE = lib
 TARGET = Imports
+os2:TARGET_SHORT = Imprts
 QT += qml
 CONFIG += qt plugin
 

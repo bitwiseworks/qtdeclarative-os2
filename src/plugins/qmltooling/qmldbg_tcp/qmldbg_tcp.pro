@@ -1,4 +1,5 @@
 TARGET = qmldbg_tcp
+os2:TARGET_SHORT = qmldt
 QT = qml-private network
 
 SOURCES += \

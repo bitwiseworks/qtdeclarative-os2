@@ -1,4 +1,5 @@
 TARGET = qmldbg_server
+os2:TARGET_SHORT = qmlds
 QT = qml-private packetprotocol-private
 
 SOURCES += \

@@ -1,4 +1,5 @@
 TARGET = qmldbg_inspector
+os2:TARGET_SHORT = qmldi
 QT    += qml-private quick-private core-private gui-private packetprotocol-private
 
 SOURCES += \

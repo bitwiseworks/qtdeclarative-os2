@@ -1,4 +1,5 @@
 TEMPLATE = lib
+os2:TARGET_SHORT = chldp
 CONFIG += childplugin
 SOURCES = childplugin.cpp
 QT = core qml

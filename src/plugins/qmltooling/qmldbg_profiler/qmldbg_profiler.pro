@@ -1,4 +1,5 @@
 TARGET = qmldbg_profiler
+os2:TARGET_SHORT = qmldp
 QT = qml-private core-private packetprotocol-private
 
 SOURCES += \

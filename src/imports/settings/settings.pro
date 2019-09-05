@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET  = qmlsettingsplugin
+os2:TARGET_SHORT = qmlsp
 TARGETPATH = Qt/labs/settings
 IMPORT_VERSION = 1.1
 

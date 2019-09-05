@@ -1,5 +1,6 @@
 CXX_MODULE = qml
 TARGET  = qmlfolderlistmodelplugin
+os2:TARGET_SHORT = qmlflmp
 TARGETPATH = Qt/labs/folderlistmodel
 IMPORT_VERSION = 2.$$QT_MINOR_VERSION
 

@@ -1,4 +1,5 @@
 TARGET = QtQuickShapes
+os2:TARGET_SHORT = QtQShp
 
 QT = core gui-private qml quick-private
 
