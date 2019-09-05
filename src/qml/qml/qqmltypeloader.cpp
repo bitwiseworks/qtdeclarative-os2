@@ -70,7 +70,7 @@
 
 #include <functional>
 
-#if defined (Q_OS_UNIX)
+#if defined (Q_OS_UNIXLIKE)
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>

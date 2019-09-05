@@ -37,6 +37,10 @@
 **
 ****************************************************************************/
 
+#if defined(__OS2__) // https://github.com/psmedley/gcc/issues/34
+#define _GNU_SOURCE
+#endif
+
 #include "qv4mathobject_p.h"
 #include "qv4objectproto_p.h"
 #include "qv4symbol_p.h"
@@ -148,6 +152,8 @@ ReturnedValue MathObject::method_acosh(const FunctionObject *, const Value *, co
 
 #ifdef Q_OS_ANDROID // incomplete std :-(
     RETURN_RESULT(Encode(std::log(v +std::sqrt(v + 1) * std::sqrt(v - 1))));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    RETURN_RESULT(Encode(::acosh(v)));
 #else
     RETURN_RESULT(Encode(std::acosh(v)));
 #endif
@@ -170,6 +176,8 @@ ReturnedValue MathObject::method_asinh(const FunctionObject *, const Value *, co
 
 #ifdef Q_OS_ANDROID // incomplete std :-(
     RETURN_RESULT(Encode(std::log(v +std::sqrt(1 + v * v))));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    RETURN_RESULT(Encode(::asinh(v)));
 #else
     RETURN_RESULT(Encode(std::asinh(v)));
 #endif
@@ -198,6 +206,8 @@ ReturnedValue MathObject::method_atanh(const FunctionObject *, const Value *, co
         RETURN_RESULT(Encode(qt_qnan()));
 
     RETURN_RESULT(Encode(copySign(qt_inf(), v)));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    RETURN_RESULT(Encode(::atanh(v)));
 #else
     RETURN_RESULT(Encode(std::atanh(v)));
 #endif
@@ -226,6 +236,8 @@ ReturnedValue MathObject::method_cbrt(const FunctionObject *, const Value *, con
     double v = argc ? argv[0].toNumber() : qt_qnan();
 #ifdef Q_OS_ANDROID // incomplete std :-(
     RETURN_RESULT(Encode(copySign(std::exp(std::log(std::abs(v)) / 3), v)));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    RETURN_RESULT(Encode(::cbrt(v))); // cube root
 #else
     RETURN_RESULT(Encode(std::cbrt(v))); // cube root
 #endif
@@ -284,6 +296,8 @@ ReturnedValue MathObject::method_expm1(const FunctionObject *, const Value *, co
     } else {
 #ifdef Q_OS_ANDROID // incomplete std :-(
         RETURN_RESULT(Encode(std::exp(v) - 1));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+        RETURN_RESULT(Encode(::expm1(v)));
 #else
         RETURN_RESULT(Encode(std::expm1(v)));
 #endif
@@ -330,6 +344,9 @@ ReturnedValue MathObject::method_hypot(const FunctionObject *, const Value *, co
         RETURN_RESULT(Encode(qt_qnan()));
     // Should actually check for {und,ov}erflow, but too fiddly !
     RETURN_RESULT(Value::fromDouble(sqrt(v)));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    for (int i = 1; i < argc; i++)
+        v = ::hypot(v, argv[i].toNumber());
 #else
     for (int i = 1; i < argc; i++)
         v = std::hypot(v, argv[i].toNumber());
@@ -365,7 +382,7 @@ ReturnedValue MathObject::method_log10(const FunctionObject *, const Value *, co
 
 ReturnedValue MathObject::method_log1p(const FunctionObject *, const Value *, const Value *argv, int argc)
 {
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(Q_OS_OS2) // https://github.com/psmedley/gcc/issues/34
     using std::log1p;
 #endif
     double v = argc ? argv[0].toNumber() : qt_qnan();
@@ -385,6 +402,8 @@ ReturnedValue MathObject::method_log2(const FunctionObject *, const Value *, con
         // Android ndk r10e doesn't have std::log2, so fall back.
         const double ln2 = std::log(2.0);
         RETURN_RESULT(Encode(std::log(v) / ln2));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+        RETURN_RESULT(Encode(::log2(v)));
 #else
         RETURN_RESULT(Encode(std::log2(v)));
 #endif
@@ -546,6 +565,8 @@ ReturnedValue MathObject::method_trunc(const FunctionObject *, const Value *, co
     // Nearest integer not greater in magnitude:
     quint64 whole = std::abs(v);
     RETURN_RESULT(Encode(copySign(whole, v)));
+#elif defined Q_OS_OS2 // https://github.com/psmedley/gcc/issues/34
+    RETURN_RESULT(Encode(::trunc(v)));
 #else
     RETURN_RESULT(Encode(std::trunc(v)));
 #endif

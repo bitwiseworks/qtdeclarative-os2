@@ -842,7 +842,7 @@ bool QQmlImportInstance::resolveType(QQmlTypeLoader *typeLoader, const QHashedSt
         for (uint i = 0; i < sizeof(urlsToTry) / sizeof(urlsToTry[0]); ++i) {
             exists = typeLoader->fileExists(localDirectoryPath, urlsToTry[i]);
             if (exists) {
-#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN) || defined(Q_OS_OS2)
                 // don't let function.qml confuse the use of "new Function(...)" for example.
                 if (!QQml_isFileCaseCorrect(localDirectoryPath + urlsToTry[i])) {
                     exists = false;
@@ -1800,7 +1800,7 @@ QQmlImportDatabase::QQmlImportDatabase(QQmlEngine *e)
     // env import paths
     if (Q_UNLIKELY(!qEnvironmentVariableIsEmpty("QML2_IMPORT_PATH"))) {
         const QString envImportPath = qEnvironmentVariable("QML2_IMPORT_PATH");
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_WIN) || defined(Q_OS_OS2)
         QLatin1Char pathSep(';');
 #else
         QLatin1Char pathSep(':');
@@ -1892,7 +1892,7 @@ QString QQmlImportDatabase::resolvePlugin(QQmlTypeLoader *typeLoader,
                                                   const QString &qmldirPath, const QString &qmldirPluginPath,
                                                   const QString &baseName)
 {
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_WIN) || defined(Q_OS_OS2)
     static const QString prefix;
     static const QStringList suffixes = {
 # ifdef QT_DEBUG

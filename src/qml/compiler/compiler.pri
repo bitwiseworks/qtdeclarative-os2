@@ -40,7 +40,7 @@ SOURCES += \
     $$PWD/qqmlpropertyvalidator.cpp \
     $$PWD/qv4compilationunitmapper.cpp
 
-unix: SOURCES += $$PWD/qv4compilationunitmapper_unix.cpp
+unix|os2: SOURCES += $$PWD/qv4compilationunitmapper_unix.cpp
 else: SOURCES += $$PWD/qv4compilationunitmapper_win.cpp
 }
 

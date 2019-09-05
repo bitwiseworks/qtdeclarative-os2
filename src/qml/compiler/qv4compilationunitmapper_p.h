@@ -72,7 +72,7 @@ public:
     void close();
 
 private:
-#if defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIXLIKE)
     size_t length;
 #endif
     void *dataPtr;

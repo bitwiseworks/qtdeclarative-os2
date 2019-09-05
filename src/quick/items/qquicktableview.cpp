@@ -37,6 +37,10 @@
 **
 ****************************************************************************/
 
+#if defined(__OS2__)
+#define _GNU_SOURCE // for log2
+#endif
+
 #include "qquicktableview_p.h"
 #include "qquicktableview_p_p.h"
 

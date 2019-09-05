@@ -941,6 +941,12 @@ bool compactDependencies(QStringList *dependencies)
     return false;
 }
 
+#ifdef Q_OS_OS2 // incomplete wide char support in LIBC/GCC, https://github.com/bitwiseworks/libc/issues/8
+#define wostream ostream
+#define toStdWString toStdString
+#define wcerr cerr
+#endif
+
 inline std::wostream &operator<<(std::wostream &str, const QString &s)
 {
 #ifdef Q_OS_WIN

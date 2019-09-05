@@ -69,6 +69,12 @@ inline QString moduleLiteral()       { return QStringLiteral("module"); }
 inline QString javascriptLiteral()   { return QStringLiteral("javascript"); }
 inline QString directoryLiteral()    { return QStringLiteral("directory"); }
 
+#ifdef Q_OS_OS2 // incomplete wide char support in LIBC/GCC, https://github.com/bitwiseworks/libc/issues/8
+#define wstring string
+#define toStdWString toStdString
+#define wcerr cerr
+#endif
+
 void printUsage(const QString &appNameIn)
 {
     const std::wstring appName = appNameIn.toStdWString();
