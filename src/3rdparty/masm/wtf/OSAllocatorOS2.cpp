@@ -77,7 +77,7 @@ void OSAllocator::commit(void* address, size_t bytes, bool writable, bool execut
 
 void OSAllocator::decommit(void* address, size_t bytes)
 {
-    if (DosSetMem(address, bytes, PAG_DEFAULT | PAG_DECOMMIT))
+    if (DosSetMem(address, bytes, PAG_DECOMMIT))
         CRASH();
 }
 
