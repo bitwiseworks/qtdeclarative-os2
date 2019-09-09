@@ -4,6 +4,7 @@ QT += qml quick
 
 DESTDIR = ImageProviderCore
 TARGET  = qmlimageproviderplugin
+os2:TARGET_SHORT = qmlipp
 
 SOURCES += imageprovider.cpp
 

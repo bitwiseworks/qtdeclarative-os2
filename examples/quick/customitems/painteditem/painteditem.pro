@@ -3,6 +3,7 @@ CONFIG += plugin
 QT += qml quick
 
 TARGET = qmltextballoonplugin
+os2:TARGET_SHORT = qmltbp
 
 HEADERS += TextBalloonPlugin/plugin.h \
     textballoon.h

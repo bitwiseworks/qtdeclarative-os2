@@ -4,6 +4,7 @@ QT += qml quick
 
 DESTDIR = ImageResponseProviderCore
 TARGET  = qmlimageresponseproviderplugin
+os2:TARGET_SHORT = qmlirpp
 
 SOURCES += imageresponseprovider.cpp
 

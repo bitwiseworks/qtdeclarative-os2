@@ -4,6 +4,7 @@ QT += qml quick
 
 DESTDIR = ../Charts
 TARGET = $$qtLibraryTarget(chartsplugin)
+os2:TARGET_SHORT = $$qtLibraryTarget(chrtp)
 
 HEADERS += piechart.h \
            pieslice.h \
