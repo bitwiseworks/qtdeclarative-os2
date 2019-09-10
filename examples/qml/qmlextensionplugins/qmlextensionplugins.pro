@@ -5,6 +5,7 @@ QT += qml
 DESTDIR = imports/TimeExample
 TARGET  = qmlqtimeexampleplugin
 os2:TARGET_SHORT = qmlqtep
+os2:CONFIG += target_short_symlink
 
 SOURCES += plugin.cpp
 

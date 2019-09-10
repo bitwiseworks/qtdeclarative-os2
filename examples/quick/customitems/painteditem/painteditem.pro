@@ -4,6 +4,7 @@ QT += qml quick
 
 TARGET = qmltextballoonplugin
 os2:TARGET_SHORT = qmltbp
+os2:CONFIG += target_short_symlink
 
 HEADERS += TextBalloonPlugin/plugin.h \
     textballoon.h
