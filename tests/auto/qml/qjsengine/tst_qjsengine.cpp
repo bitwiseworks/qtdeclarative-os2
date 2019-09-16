@@ -3949,7 +3949,7 @@ void tst_QJSEngine::translationFilePath_data()
     QTest::newRow("relative") << QStringLiteral("script.js");
     QTest::newRow("absolute unix") << QStringLiteral("/script.js");
     QTest::newRow("absolute /windows/") << QStringLiteral("c:/script.js");
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     QTest::newRow("absolute \\windows\\") << QStringLiteral("c:\\script.js");
 #endif
     QTest::newRow("relative url") << QStringLiteral("file://script.js");

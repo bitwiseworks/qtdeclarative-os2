@@ -512,12 +512,12 @@ int quick_test_main_with_setup(int argc, char **argv, const char *name, const ch
     }
     if (testPath.isEmpty()) {
         QDir current = QDir::current();
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_OS2)
         // Skip release/debug subfolders
         if (!current.dirName().compare(QLatin1String("Release"), Qt::CaseInsensitive)
             || !current.dirName().compare(QLatin1String("Debug"), Qt::CaseInsensitive))
             current.cdUp();
-#endif // Q_OS_WIN
+#endif // Q_OS_WIN || Q_OS_OS2
         testPath = current.absolutePath();
     }
     QStringList files;

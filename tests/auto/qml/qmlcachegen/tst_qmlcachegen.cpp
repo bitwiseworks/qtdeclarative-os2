@@ -493,7 +493,7 @@ void tst_qmlcachegen::trickyPaths_data()
     QTest::newRow("version style suffix 2") << QStringLiteral(":/directory with spaces/versionStyleSuffix-1.2-more.qml");
 
     // QTBUG-46375
-#if !defined(Q_OS_WIN)
+#if !defined(Q_OS_DOSLIKE)
     QTest::newRow("path with umlaut") << QStringLiteral(":/Bäh.qml");
 #endif
 }

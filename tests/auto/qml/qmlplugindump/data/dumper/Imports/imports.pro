@@ -1,6 +1,6 @@
 TEMPLATE = lib
 TARGET = Imports
-os2:TARGET_SHORT = Imprts
+os2:TARGET_SHORT = Imprts # Avoid conflict with IMPORTS .DEF keyword
 os2:CONFIG += target_short_symlink
 QT += qml
 CONFIG += qt plugin
@@ -9,6 +9,7 @@ CONFIG -= debug_and_release_target
 !build_pass:qtConfig(debug_and_release): CONFIG += release
 
 TARGET = $$qtLibraryTarget($$TARGET)
+os2:TARGET_SHORT = $$qtLibraryTarget($$TARGET_SHORT)
 
 SOURCES += \
     imports_plugin.cpp \

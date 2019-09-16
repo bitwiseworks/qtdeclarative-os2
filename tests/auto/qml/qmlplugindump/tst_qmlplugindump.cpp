@@ -63,7 +63,7 @@ void tst_qmlplugindump::initTestCase()
     QQmlDataTest::initTestCase();
     qmlplugindumpPath = QLibraryInfo::location(QLibraryInfo::BinariesPath);
 
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_DOSLIKE)
     qmlplugindumpPath += QLatin1String("/qmlplugindump.exe");
 #else
     qmlplugindumpPath += QLatin1String("/qmlplugindump");
@@ -157,7 +157,8 @@ void tst_qmlplugindump::plugin()
     QProcess dumper;
     dumper.setWorkingDirectory(dataDirectory());
     QStringList args = { QLatin1String("-nonrelocatable"), QLatin1String("-noforceqtquick"), import, version, QLatin1String(".") };
-    dumper.start(qmlplugindumpPath, args);
+    // Use QIODevice::Text to translate CRLF to LF in dumper output to match expected file's EOLs on Win/OS2
+    dumper.start(qmlplugindumpPath, args, dumper.ReadWrite | dumper.Text);
     QVERIFY2(dumper.waitForStarted(), qPrintable(dumper.errorString()));
     QVERIFY2(dumper.waitForFinished(), qPrintable(dumper.errorString()));
 

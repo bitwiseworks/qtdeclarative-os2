@@ -46,7 +46,7 @@ private slots:
 
 
 const QString testExe =
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_DOSLIKE)
     QFINDTESTDATA("quicktestmain/quicktestmain.exe");
 #else
     QFINDTESTDATA("quicktestmain/quicktestmain");

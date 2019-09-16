@@ -32,8 +32,8 @@
 #include <QtQml/private/qsequentialanimationgroupjob_p.h>
 #include <QtQml/private/qparallelanimationgroupjob_p.h>
 
-#ifdef Q_OS_WIN
-static const char winTimerError[] = "On windows, consistent timing is not working properly due to bad timer resolution";
+#ifdef Q_OS_DOSLIKE
+static const char winTimerError[] = "On windows and OS/2, consistent timing is not working properly due to bad timer resolution";
 #endif
 
 class TestablePauseAnimation : public QPauseAnimationJob
@@ -142,7 +142,7 @@ void tst_QPauseAnimationJob::noTimerUpdates()
     animation.start();
     QTest::qWait(animation.totalDuration() + 100);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
@@ -150,7 +150,7 @@ void tst_QPauseAnimationJob::noTimerUpdates()
     QCOMPARE(animation.state(), QAbstractAnimationJob::Stopped);
     const int expectedLoopCount = 1 + loopCount;
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation.m_updateCurrentTimeCount != expectedLoopCount)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
@@ -171,25 +171,25 @@ void tst_QPauseAnimationJob::multiplePauseAnimations()
     animation2.start();
     QTest::qWait(animation.totalDuration() + 100);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(animation.state(), QAbstractAnimationJob::Stopped);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation2.state() != QAbstractAnimationJob::Running)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(animation2.state(), QAbstractAnimationJob::Running);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation.m_updateCurrentTimeCount != 2)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(animation.m_updateCurrentTimeCount, 2);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (animation2.m_updateCurrentTimeCount != 2)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
@@ -386,7 +386,7 @@ void tst_QPauseAnimationJob::multipleSequentialGroups()
     // measure...
     QTest::qWait(group.totalDuration() + 500);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (group.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
     QCOMPARE(group.state(), QAbstractAnimationJob::Stopped);
@@ -394,31 +394,31 @@ void tst_QPauseAnimationJob::multipleSequentialGroups()
     QTRY_COMPARE(group.state(), QAbstractAnimationJob::Stopped);
 #endif
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (subgroup1.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(subgroup1.state(), QAbstractAnimationJob::Stopped);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (subgroup2.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(subgroup2.state(), QAbstractAnimationJob::Stopped);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (subgroup3.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(subgroup3.state(), QAbstractAnimationJob::Stopped);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (subgroup4.state() != QAbstractAnimationJob::Stopped)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif
     QCOMPARE(subgroup4.state(), QAbstractAnimationJob::Stopped);
 
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     if (pause5.m_updateCurrentTimeCount != 4)
         QEXPECT_FAIL("", winTimerError, Abort);
 #endif

@@ -65,7 +65,7 @@ tst_qmlmin::tst_qmlmin()
 void tst_qmlmin::initTestCase()
 {
     qmlminPath = QLibraryInfo::location(QLibraryInfo::BinariesPath) + QLatin1String("/qmlmin");
-#ifdef Q_OS_WIN
+#ifdef Q_OS_DOSLIKE
     qmlminPath += QLatin1String(".exe");
 #endif
     if (!QFileInfo(qmlminPath).exists()) {

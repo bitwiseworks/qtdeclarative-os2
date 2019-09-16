@@ -30,7 +30,7 @@
 #include <QtTest>
 #include <QtQml>
 
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_DOSLIKE)
 # define SUFFIX QLatin1String(".dll")
 # define DEBUG_SUFFIX QLatin1String("d.dll")
 
