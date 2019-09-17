@@ -340,6 +340,12 @@ bool generateLoader(const QStringList &compiledFiles, const QStringList &sortedR
 
     {
         QTextStream stream(&generatedLoaderCode);
+#ifdef Q_OS_OS2
+        // On OS/2, QTextCodec::codecForLocale returns a local 8-bit encoding but
+        // GCC expects UTF-8 sources (and tst_qmlcachegen has some non-latin1 chars
+        // to test that). So force UTF-8 here.
+        stream.setCodec("UTF-8");
+#endif
         stream << "#include <QtQml/qqmlprivate.h>\n";
         stream << "#include <QtCore/qdir.h>\n";
         stream << "#include <QtCore/qurl.h>\n";
