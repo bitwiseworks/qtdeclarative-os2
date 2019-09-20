@@ -153,6 +153,7 @@ private slots:
     void headerChangesViewport();
     void footer();
     void footer_data();
+    void footer2();
     void extents();
     void extents_data();
     void resetModel_headerFooter();
@@ -277,6 +278,7 @@ private slots:
     void addOnCompleted();
     void setPositionOnLayout();
     void touchCancel();
+    void resizeAfterComponentComplete();
 
 private:
     template <class T> void items(const QUrl &source);
@@ -4137,6 +4139,21 @@ void tst_QQuickListView::footer_data()
         << QPointF(0, -320)
         << QPointF(0, -20)
         << QPointF(0, -(30 * 20) - 10);
+}
+
+void tst_QQuickListView::footer2() // QTBUG-31677
+{
+    QQuickView *window = getView();
+    window->setSource(testFileUrl("footer2.qml"));
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    QQuickListView *listview = findItem<QQuickListView>(window->rootObject(), "list");
+    QTRY_VERIFY(listview != nullptr);
+
+    QQuickItem *footer = listview->footerItem();
+    QVERIFY(footer != nullptr);
+    QTRY_COMPARE(footer->y(), 0.0);
 }
 
 class LVAccessor : public QQuickListView
@@ -9000,6 +9017,21 @@ void tst_QQuickListView::touchCancel() // QTBUG-74679
     listview->setCurrentIndex(1);
     // ensure that it actually moves (animates) to the second delegate
     QTRY_COMPARE(listview->contentY(), 500.0);
+}
+
+void tst_QQuickListView::resizeAfterComponentComplete()  // QTBUG-76487
+{
+    QScopedPointer<QQuickView> window(createView());
+    window->setSource(testFileUrl("resizeAfterComponentComplete.qml"));
+    window->resize(640, 480);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+
+    QObject *listView = window->rootObject();
+    QVERIFY(listView);
+
+    QObject *lastItem = qvariant_cast<QObject *>(listView->property("lastItem"));
+    QTRY_COMPARE(lastItem->property("y").toInt(), 9 * lastItem->property("height").toInt());
 }
 
 QTEST_MAIN(tst_QQuickListView)
