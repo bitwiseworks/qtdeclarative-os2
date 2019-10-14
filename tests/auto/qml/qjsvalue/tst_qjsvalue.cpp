@@ -2619,7 +2619,7 @@ void tst_QJSValue::nestedObjectToVariant()
 
 void tst_QJSValue::deleteFromDifferentThread()
 {
-#if !QT_CONFIG(thread)
+#if !QT_CONFIG(thread) || !QT_CONFIG(cxx11_future)
     QSKIP("Need thread support to destroy QJSValues from different threads");
 #else
     QV4::PersistentValueStorage storage(engine->handle());
