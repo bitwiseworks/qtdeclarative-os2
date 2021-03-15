@@ -35,7 +35,6 @@
 #include <QtQuick>
 #include <QtQuick/private/qquickrectangle_p.h>
 #include <QtQuick/private/qquickmousearea_p.h>
-#include <private/qv8engine_p.h>
 #include <private/qqmlcontext_p.h>
 #include <private/qv4qmlcontext_p.h>
 #include <private/qv4scopedvalue_p.h>
@@ -122,6 +121,10 @@ private slots:
     void relativeUrl_data();
     void relativeUrl();
     void setDataNoEngineNoSegfault();
+    void testRequiredProperties_data();
+    void testRequiredProperties();
+    void testRequiredPropertiesFromQml();
+    void testSetInitialProperties();
 
 private:
     QQmlEngine engine;
@@ -222,12 +225,12 @@ void tst_qqmlcomponent::qmlCreateObjectAutoParent()
     QVERIFY(window_item);
     QVERIFY(window_window);
 
-    QCOMPARE(qtobject_item->metaObject()->className(), "QQuickItem");
-    QCOMPARE(qtobject_window->metaObject()->className(), "QQuickWindow");
-    QCOMPARE(item_item->metaObject()->className(), "QQuickItem");
-    QCOMPARE(item_window->metaObject()->className(), "QQuickWindow");
-    QCOMPARE(window_item->metaObject()->className(), "QQuickItem");
-    QCOMPARE(window_window->metaObject()->className(), "QQuickWindow");
+    QVERIFY(QByteArray(qtobject_item->metaObject()->className()).startsWith("QQuickItem"));
+    QVERIFY(QByteArray(qtobject_window->metaObject()->className()).startsWith("QQuickWindow"));
+    QVERIFY(QByteArray(item_item->metaObject()->className()).startsWith("QQuickItem"));
+    QVERIFY(QByteArray(item_window->metaObject()->className()).startsWith("QQuickWindow"));
+    QVERIFY(QByteArray(window_item->metaObject()->className()).startsWith("QQuickItem"));
+    QVERIFY(QByteArray(window_window->metaObject()->className()).startsWith("QQuickWindow"));
 
     QCOMPARE(qtobject_qtobject->parent(), qtobjectParent);
     QCOMPARE(qtobject_item->parent(), qtobjectParent);
@@ -637,9 +640,11 @@ void tst_qqmlcomponent::relativeUrl_data()
 {
     QTest::addColumn<QUrl>("url");
 
+#if !defined(Q_OS_ANDROID)
     QTest::addRow("fromLocalFile") << QUrl::fromLocalFile("data/QtObjectComponent.qml");
     QTest::addRow("fromLocalFileHash") << QUrl::fromLocalFile("data/QtObjectComponent#2.qml");
     QTest::addRow("constructor") << QUrl("data/QtObjectComponent.qml");
+#endif
     QTest::addRow("absolute") << QUrl::fromLocalFile(QFINDTESTDATA("data/QtObjectComponent.qml"));
     QTest::addRow("qrc") << QUrl("qrc:/data/QtObjectComponent.qml");
 }
@@ -664,6 +669,167 @@ void tst_qqmlcomponent::setDataNoEngineNoSegfault()
     QTest::ignoreMessage(QtWarningMsg, "QQmlComponent: Must provide an engine before calling create");
     auto c = comp.create();
     QVERIFY(!c);
+}
+
+class RequiredDefaultCpp : public QObject
+{
+    Q_OBJECT
+public:
+    Q_PROPERTY(QQuickItem *defaultProperty MEMBER m_defaultProperty NOTIFY defaultPropertyChanged REQUIRED)
+    Q_SIGNAL void defaultPropertyChanged();
+    Q_CLASSINFO("DefaultProperty", "defaultProperty")
+private:
+    QQuickItem *m_defaultProperty = nullptr;
+};
+
+void tst_qqmlcomponent::testRequiredProperties_data()
+{
+    qmlRegisterType<RequiredDefaultCpp>("qt.test", 1, 0, "RequiredDefaultCpp");
+    QTest::addColumn<QUrl>("testFile");
+    QTest::addColumn<bool>("shouldSucceed");
+    QTest::addColumn<QString>("errorMsg");
+
+    QTest::addRow("requiredSetViaChainedAlias") << testFileUrl("requiredSetViaChainedAlias.qml") << true << "";
+    QTest::addRow("requiredNotSet") << testFileUrl("requiredNotSet.qml") << false << "Required property i was not initialized";
+    QTest::addRow("requiredSetInSameFile") << testFileUrl("requiredSetInSameFile.qml") << true << "";
+    QTest::addRow("requiredSetViaAlias1") << testFileUrl("requiredSetViaAliasBeforeSameFile.qml") << true << "";
+    QTest::addRow("requiredSetViaAlias2") << testFileUrl("requiredSetViaAliasAfterSameFile.qml") << true << "";
+    QTest::addRow("requiredSetViaAlias3") << testFileUrl("requiredSetViaAliasParentFile.qml") << true << "";
+    QTest::addRow("shadowing") << testFileUrl("shadowing.qml") << false <<  "Required property i was not initialized";
+    QTest::addRow("setLater") << testFileUrl("requiredSetLater.qml") << true << "";
+    QTest::addRow("setViaAliasToSubcomponent") << testFileUrl("setViaAliasToSubcomponent.qml") << true << "";
+    QTest::addRow("aliasToSubcomponentNotSet") << testFileUrl("aliasToSubcomponentNotSet.qml") << false << "It can be set via the alias property i_alias";
+    QTest::addRow("required default set") << testFileUrl("requiredDefault.1.qml") << true << "";
+    QTest::addRow("required default not set") << testFileUrl("requiredDefault.2.qml") << false << "Required property requiredDefault was not initialized";
+    QTest::addRow("required default set (C++)") << testFileUrl("requiredDefault.3.qml") << true << "";
+    QTest::addRow("required default not set (C++)") << testFileUrl("requiredDefault.4.qml") << false << "Required property defaultProperty was not initialized";
+}
+
+
+void tst_qqmlcomponent::testRequiredProperties()
+{
+    QQmlEngine eng;
+    using QScopedObjPointer = QScopedPointer<QObject>;
+    QFETCH(QUrl, testFile);
+    QFETCH(bool, shouldSucceed);
+    QQmlComponent comp(&eng);
+    comp.loadUrl(testFile);
+    QScopedObjPointer obj {comp.create()};
+    if (shouldSucceed)
+        QVERIFY(obj);
+    else {
+        QVERIFY(!obj);
+        QFETCH(QString, errorMsg);
+        QVERIFY(comp.errorString().contains(errorMsg));
+    }
+}
+
+void tst_qqmlcomponent::testRequiredPropertiesFromQml()
+{
+    QQmlEngine eng;
+    {
+        QQmlComponent comp(&eng);
+        comp.loadUrl(testFileUrl("createdFromQml.qml"));
+        QScopedPointer<QObject> obj { comp.create() };
+        QVERIFY(obj);
+        auto root = qvariant_cast<QQuickItem*>(obj->property("it"));
+        QVERIFY(root);
+        QCOMPARE(root->property("i").toInt(), 42);
+    }
+    {
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, QRegularExpression(".*requiredNotSet.qml:4:5: Required property i was not initialized"));
+        QQmlComponent comp(&eng);
+        comp.loadUrl(testFileUrl("createdFromQmlFail.qml"));
+        QScopedPointer<QObject> obj { comp.create() };
+        QVERIFY(obj);
+        QCOMPARE(qvariant_cast<QQuickItem *>(obj->property("it")), nullptr);
+    }
+}
+
+struct ComponentWithPublicSetInitial : QQmlComponent
+{
+    using QQmlComponent::QQmlComponent;
+    void setInitialProperties(QObject *o, QVariantMap map)
+    {
+        QQmlComponent::setInitialProperties(o, map);
+    }
+};
+
+void tst_qqmlcomponent::testSetInitialProperties()
+{
+    QQmlEngine eng;
+    {
+        //  QVariant
+        ComponentWithPublicSetInitial comp(&eng);
+        comp.loadUrl(testFileUrl("variantBasedInitialization.qml"));
+        QScopedPointer<QObject> obj { comp.beginCreate(eng.rootContext()) };
+        QVERIFY(obj);
+        QUrl myurl = comp.url();
+        QFont myfont;
+        QDateTime mydate = QDateTime::currentDateTime();
+        QPoint mypoint {1,2};
+        QSizeF mysize {0.5, 0.3};
+        QMatrix4x4 matrix {};
+        QQuaternion quat {5.0f, 0.3f, 0.2f, 0.1f};
+        QVector2D vec2 {2.0f, 3.1f};
+        QVector3D vec3 {1.0f, 2.0, 3.0f};
+        QVector4D vec4 {1.0f, 2.0f, 3.0f, 4.0f};
+#define ASJSON(NAME) {QLatin1String(#NAME), NAME}
+        comp.setInitialProperties(obj.get(), QVariantMap {
+                                                     {QLatin1String("i"), 42},
+                                                     {QLatin1String("b"), true},
+                                                     {QLatin1String("d"), 3.1416},
+                                                     {QLatin1String("s"), QLatin1String("hello world")},
+                                                     {QLatin1String("nothing"), QVariant::fromValue( nullptr)},
+                                                     ASJSON(myurl),
+                                                     ASJSON(myfont),
+                                                     ASJSON(mydate),
+                                                     ASJSON(mypoint),
+                                                     ASJSON(mysize),
+                                                     ASJSON(matrix),
+                                                     ASJSON(quat),
+                                                     ASJSON(vec2), ASJSON(vec3), ASJSON(vec4)
+                                             });
+#undef ASJSON
+        comp.completeCreate();
+        QVERIFY(comp.errors().empty());
+        QCOMPARE(obj->property("i"), 42);
+        QCOMPARE(obj->property("b"), true);
+        QCOMPARE(obj->property("d"), 3.1416);
+        QCOMPARE(obj->property("s"), QLatin1String("hello world"));
+        QCOMPARE(obj->property("nothing"), QVariant::fromValue(nullptr));
+#define COMPARE(NAME) QCOMPARE(obj->property(#NAME), NAME)
+        COMPARE(myurl);
+        COMPARE(myfont);
+        COMPARE(mydate);
+        COMPARE(mypoint);
+        COMPARE(mysize);
+        COMPARE(matrix);
+        COMPARE(quat);
+        COMPARE(vec2);
+        COMPARE(vec3);
+        COMPARE(vec4);
+#undef COMPARE
+
+    }
+    {
+        // createWithInitialProperties convenience function
+        QQmlComponent comp(&eng);
+        comp.loadUrl(testFileUrl("requiredNotSet.qml"));
+        QScopedPointer<QObject> obj {comp.createWithInitialProperties( QVariantMap { {QLatin1String("i"), QJsonValue{42}}  })};
+        QVERIFY(obj);
+        QCOMPARE(obj->property("i"), 42);
+    }
+    {
+        // createWithInitialProperties: setting a nonexistent property
+        QQmlComponent comp(&eng);
+        comp.loadUrl(testFileUrl("allJSONTypes.qml"));
+        QScopedPointer<QObject> obj {
+            comp.createWithInitialProperties(QVariantMap { {"notThePropertiesYoureLookingFor", 42} })
+        };
+        QVERIFY(obj);
+        QVERIFY(comp.errorString().contains("Could not set property notThePropertiesYoureLookingFor"));
+    }
 }
 
 QTEST_MAIN(tst_qqmlcomponent)

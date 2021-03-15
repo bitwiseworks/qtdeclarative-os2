@@ -93,7 +93,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem
     Q_PROPERTY(EchoMode echoMode READ echoMode WRITE setEchoMode NOTIFY echoModeChanged)
     Q_PROPERTY(bool activeFocusOnPress READ focusOnPress WRITE setFocusOnPress NOTIFY activeFocusOnPressChanged)
     Q_PROPERTY(QString passwordCharacter READ passwordCharacter WRITE setPasswordCharacter NOTIFY passwordCharacterChanged)
-    Q_PROPERTY(int passwordMaskDelay READ passwordMaskDelay WRITE setPasswordMaskDelay RESET resetPasswordMaskDelay NOTIFY passwordMaskDelayChanged REVISION 3)
+    Q_PROPERTY(int passwordMaskDelay READ passwordMaskDelay WRITE setPasswordMaskDelay RESET resetPasswordMaskDelay NOTIFY passwordMaskDelayChanged REVISION 4)
     Q_PROPERTY(QString displayText READ displayText NOTIFY displayTextChanged)
     Q_PROPERTY(QString preeditText READ preeditText NOTIFY preeditTextChanged REVISION 7)
     Q_PROPERTY(bool autoScroll READ autoScroll WRITE setAutoScroll NOTIFY autoScrollChanged)
@@ -113,6 +113,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextInput : public QQuickImplicitSizeItem
     Q_PROPERTY(qreal leftPadding READ leftPadding WRITE setLeftPadding RESET resetLeftPadding NOTIFY leftPaddingChanged REVISION 6)
     Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION 6)
     Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
+    QML_NAMED_ELEMENT(TextInput)
 
 public:
     QQuickTextInput(QQuickItem * parent=nullptr);
@@ -268,7 +269,7 @@ public:
 
 #if QT_CONFIG(im)
     QVariant inputMethodQuery(Qt::InputMethodQuery property) const override;
-    Q_REVISION(3) Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery query, QVariant argument) const;
+    Q_REVISION(4) Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery query, const QVariant &argument) const;
 #endif
 
     QRectF boundingRect() const override;
@@ -336,7 +337,7 @@ Q_SIGNALS:
     void inputMaskChanged(const QString &inputMask);
     void echoModeChanged(QQuickTextInput::EchoMode echoMode);
     void passwordCharacterChanged();
-    Q_REVISION(3) void passwordMaskDelayChanged(int delay);
+    Q_REVISION(4) void passwordMaskDelayChanged(int delay);
     void displayTextChanged();
     Q_REVISION(7) void preeditTextChanged();
     void activeFocusOnPressChanged(bool activeFocusOnPress);
@@ -399,7 +400,7 @@ public Q_SLOTS:
     void redo();
     void insert(int position, const QString &text);
     void remove(int start, int end);
-    Q_REVISION(3) void ensureVisible(int position);
+    Q_REVISION(4) void ensureVisible(int position);
     Q_REVISION(7) void clear();
 
 private Q_SLOTS:

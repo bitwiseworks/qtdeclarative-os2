@@ -161,6 +161,7 @@ public:
     bool updateOnComponentComplete:1;
     bool richText:1;
     bool styledText:1;
+    bool markdownText:1;
     bool widthExceeded:1;
     bool heightExceeded:1;
     bool internalWidthUpdate:1;
@@ -194,7 +195,7 @@ public:
     void ensureDoc();
 
     QRectF setupTextLayout(qreal * const baseline);
-    void setupCustomLineGeometry(QTextLine &line, qreal &height, int lineOffset = 0);
+    void setupCustomLineGeometry(QTextLine &line, qreal &height, int fullLayoutTextLength, int lineOffset = 0);
     bool isLinkActivatedConnected();
     bool isLinkHoveredConnected();
     static QString anchorAt(const QTextLayout *layout, const QPointF &mousePos);

@@ -48,7 +48,7 @@
 ** $QT_END_LICENSE$
 **
 ****************************************************************************/
-import QtQuick 2.7
+import QtQuick 2.14
 import QtQuick.Window 2.0
 import QtQuick.LocalStorage 2.0
 import "Database.js" as JS
@@ -58,6 +58,9 @@ Item {
     id: root
     width: Screen.width / 2
     height: Screen.height / 7
+
+    required property ListView listView
+    required property Text statusText
 
     function insertrec() {
         var rowid = parseInt(JS.dbInsert(dateInput.text, descInput.text, distInput.text), 10)
@@ -143,12 +146,12 @@ Item {
                         font.pixelSize: 22
                         activeFocusOnPress: true
                         activeFocusOnTab: true
-                        validator: RegExpValidator {
-                            regExp: /[0-9/,:.]+/
+                        validator: RegularExpressionValidator {
+                            regularExpression: /[0-9/,:.]+/
                         }
                         onEditingFinished: {
                             if (dateInput.text == "") {
-                                statustext.text = "Please fill in the date"
+                                root.statusText.text = "Please fill in the date"
                                 dateInput.forceActiveFocus()
                             }
                         }
@@ -161,10 +164,10 @@ Item {
                         activeFocusOnTab: true
                         onEditingFinished: {
                             if (descInput.text.length < 8) {
-                                statustext.text = "Enter a description of minimum 8 characters"
+                                root.statusText.text = "Enter a description of minimum 8 characters"
                                 descInput.forceActiveFocus()
                             } else {
-                                statustext.text = ""
+                                root.statusText.text = ""
                             }
                         }
                     }
@@ -174,23 +177,23 @@ Item {
                         font.pixelSize: 22
                         activeFocusOnPress: true
                         activeFocusOnTab: true
-                        validator: RegExpValidator {
-                            regExp: /\d{1,3}/
+                        validator: RegularExpressionValidator {
+                            regularExpression: /\d{1,3}/
                         }
                         onEditingFinished: {
                             if (distInput.text == "") {
-                                statustext.text = "Please fill in the distance"
+                                root.statusText.text = "Please fill in the distance"
                                 distInput.forceActiveFocus()
                             }
                         }
                     }
                 }
             }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: dateInput.forceActiveFocus()
-            }
         }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        onClicked: dateInput.forceActiveFocus()
     }
 }

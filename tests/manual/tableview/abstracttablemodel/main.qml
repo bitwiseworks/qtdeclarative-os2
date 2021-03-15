@@ -37,10 +37,11 @@
 **
 ****************************************************************************/
 
-import QtQuick 2.12
+import QtQuick 2.14
 import QtQuick.Window 2.3
 import QtQml.Models 2.2
 import TestTableModel 0.1
+import QtQuick.Controls 2.5
 
 Window {
     id: window
@@ -51,56 +52,155 @@ Window {
     property int selectedX: -1
     property int selectedY: -1
 
-    TestTableModel {
-        id: tableModel
-        rowCount: 200
-        columnCount: 5000
-    }
-
     Rectangle {
         anchors.fill: parent
         anchors.margins: 10
         color: "darkgray"
 
-        Row {
+        Column {
             id: menu
             x: 2
             y: 2
-            spacing: 1
-            Button {
-                text: "Add row"
-                onClicked: tableModel.insertRows(selectedY, 1)
+
+            Row {
+                spacing: 1
+                Button {
+                    text: "Add row"
+                    onClicked: tableView.model.insertRows(selectedY, 1)
+                }
+                Button {
+                    text: "Remove row"
+                    onClicked: tableView.model.removeRows(selectedY, 1)
+                }
+                Button {
+                    text: "Add column"
+                    onClicked: tableView.model.insertColumns(selectedX, 1)
+                }
+                Button {
+                    text: "Remove column"
+                    onClicked: tableView.model.removeColumns(selectedX, 1)
+                }
             }
-            Button {
-                text: "Remove row"
-                onClicked: tableModel.removeRows(selectedY, 1)
+
+            Row {
+                spacing: 1
+                Button {
+                    text: "fast-flick<br>center table"
+                    onClicked: {
+                        tableView.contentX += tableView.width * 1.2
+                    }
+                }
+                Button {
+                    text: "flick to end<br>center table"
+                    onClicked: {
+                        tableView.contentX = tableView.contentWidth - tableView.width
+                    }
+                }
+                Button {
+                    text: "fast-flick<br>headers"
+                    onClicked: {
+                        leftHeader.contentY += 1000
+                        topHeader.contentX += 1000
+                    }
+                }
+                Button {
+                    text: "set/unset<br>master bindings"
+                    onClicked: {
+                        leftHeader.syncView = leftHeader.syncView ? null : tableView
+                        topHeader.syncView = topHeader.syncView ? null : tableView
+                    }
+                }
+                Button {
+                    text: "inc space"
+                    onClicked: {
+                        tableView.columnSpacing += 1
+                        tableView.rowSpacing += 1
+                    }
+                }
             }
-            Button {
-                text: "Add column"
-                onClicked: tableModel.insertColumns(selectedX, 1)
-            }
-            Button {
-                text: "Remove column"
-                onClicked: tableModel.removeColumns(selectedX, 1)
+            Text {
+                text: "Selected: x:" + selectedX + ", y:" + selectedY
             }
         }
-        Text {
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 2
-            text: "x:" + selectedX + ", y:" + selectedY
+
+        TableView {
+            id: topHeader
+            objectName: "topHeader"
+            anchors.left: tableView.left
+            width: tableView.width
+            anchors.top: menu.bottom
+            height: 30
+            clip: true
+            ScrollBar.horizontal: ScrollBar {}
+
+            model: TestTableModel {
+                rowCount: 1
+                columnCount: 200
+            }
+
+            delegate: Rectangle {
+                implicitHeight: topHeader.height
+                implicitWidth: 20
+                color: "lightgray"
+                Text { text: column }
+            }
+
+            columnSpacing: 1
+            rowSpacing: 1
+
+            syncDirection: Qt.Horizontal
+        }
+
+        TableView {
+            id: leftHeader
+            objectName: "leftHeader"
+            anchors.left: parent.left
+            anchors.top: tableView.top
+            height: tableView.height
+            width: 30
+            clip: true
+            ScrollBar.vertical: ScrollBar {}
+
+            model: TestTableModel {
+                rowCount: 200
+                columnCount: 1
+            }
+
+            delegate: Rectangle {
+                implicitHeight: 50
+                implicitWidth: leftHeader.width
+                color: "lightgray"
+                Text { text: row }
+            }
+
+            columnSpacing: 1
+            rowSpacing: 1
+
+            syncDirection: Qt.Vertical
         }
 
         TableView {
             id: tableView
-            anchors.left: parent.left
+            objectName: "tableview"
+            anchors.left: leftHeader.right
             anchors.right: parent.right
-            anchors.top: menu.bottom
+            anchors.top: topHeader.bottom
             anchors.bottom: parent.bottom
-            anchors.margins: 2
+            width: 200
             clip: true
+            columnWidthProvider: function(c) {
+                if (c > 30)
+                    return 100
+                else
+                    return 200;
+            }
+            ScrollBar.horizontal: ScrollBar {}
+            ScrollBar.vertical: ScrollBar {}
 
-            model: tableModel
+            model: TestTableModel {
+                rowCount: 200
+                columnCount: 60
+            }
             delegate: tableViewDelegate
             columnSpacing: 1
             rowSpacing: 1

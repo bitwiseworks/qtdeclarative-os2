@@ -44,10 +44,12 @@
 
 QT_BEGIN_NAMESPACE
 
-
 class QOpenGLFramebufferObject;
 class QQuickFramebufferObjectPrivate;
 class QSGFramebufferObjectNode;
+
+// ### Qt 6: Consider what to do here. QQuickFbo supports both direct OpenGL and
+// OpenGL via QRhi, but it cannot function when running with another rhi backend.
 
 class Q_QUICK_EXPORT QQuickFramebufferObject : public QQuickItem
 {

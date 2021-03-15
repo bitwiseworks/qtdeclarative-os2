@@ -44,7 +44,6 @@
 #include "qqmlengine_p.h"
 #include "qqmlexpression_p.h"
 #include "qqmlcontext_p.h"
-#include "qqmlmetatype_p.h"
 #include "qqml.h"
 #include "qqmlcontext.h"
 #include "qqmlglobal_p.h"
@@ -57,9 +56,11 @@
 #include <private/qv4value_p.h>
 #include <private/qv4jscall_p.h>
 #include <private/qv4qobjectwrapper_p.h>
+#include <private/qv4qmlcontext_p.h>
 
 #include <QtCore/qdebug.h>
 
+#include <qtqml_tracepoints_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -210,8 +211,6 @@ void QQmlBoundSignalExpression::evaluate(void **a)
         } else if (type == QMetaType::Int) {
             //### optimization. Can go away if we switch to metaTypeToJS, or be expanded otherwise
             jsCall->args[ii] = QV4::Value::fromInt32(*reinterpret_cast<const int*>(a[ii + 1]));
-        } else if (type == qMetaTypeId<QQmlV4Handle>()) {
-            jsCall->args[ii] = *reinterpret_cast<QQmlV4Handle *>(a[ii + 1]);
         } else if (ep->isQObject(type)) {
             if (!*reinterpret_cast<void* const *>(a[ii + 1]))
                 jsCall->args[ii] = QV4::Value::nullValue();
@@ -354,6 +353,10 @@ void QQmlBoundSignal_callback(QQmlNotifierEndpoint *e, void **a)
 
     QQmlEngine *engine;
     if (s->m_expression && (engine = s->m_expression->engine())) {
+        Q_TRACE_SCOPE(QQmlHandlingSignal, engine,
+                      s->m_expression->function() ? s->m_expression->function()->name()->toQString() : QString(),
+                      s->m_expression->sourceLocation().sourceFile, s->m_expression->sourceLocation().line,
+                      s->m_expression->sourceLocation().column);
         QQmlHandlingSignalProfiler prof(QQmlEnginePrivate::get(engine)->profiler, s->m_expression);
         s->m_expression->evaluate(a);
         if (s->m_expression && s->m_expression->hasError()) {

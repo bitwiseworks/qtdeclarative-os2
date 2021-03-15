@@ -36,6 +36,7 @@
 #include <QSysInfo>
 #include <QLoggingCategory>
 #include <private/qqmlcomponent_p.h>
+#include <private/qqmlscriptdata_p.h>
 #include <qtranslator.h>
 
 #include "../../shared/util.h"
@@ -55,6 +56,7 @@ private slots:
     void functionExpressions();
     void versionChecksForAheadOfTimeUnits();
     void retainedResources();
+    void skippedResources();
 
     void workerScripts();
 
@@ -64,6 +66,7 @@ private slots:
     void qrcScriptImport();
     void fsScriptImport();
     void moduleScriptImport();
+    void esModulesViaQJSEngine();
 
     void enums();
 
@@ -71,6 +74,9 @@ private slots:
 
     void reproducibleCache_data();
     void reproducibleCache();
+
+    void parameterAdjustment();
+    void inlineComponent();
 };
 
 // A wrapper around QQmlComponent to ensure the temporary reference counts
@@ -124,6 +130,7 @@ void tst_qmlcachegen::initTestCase()
     if (!cacheDir.isEmpty())
         //QDir(cacheDir).removeRecursively();
         qDebug() << cacheDir;
+    QQmlDataTest::initTestCase();
 }
 
 void tst_qmlcachegen::loadGeneratedFile()
@@ -359,7 +366,7 @@ static QQmlPrivate::CachedQmlUnit *temporaryModifiedCachedUnit = nullptr;
 void tst_qmlcachegen::versionChecksForAheadOfTimeUnits()
 {
     QVERIFY(QFile::exists(":/data/versionchecks.qml"));
-    QCOMPARE(QFileInfo(":/data/versionchecks.qml").size(), 0);
+    QVERIFY(QFileInfo(":/data/versionchecks.qml").size() > 0);
 
     Q_ASSERT(!temporaryModifiedCachedUnit);
     QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
@@ -386,12 +393,8 @@ void tst_qmlcachegen::versionChecksForAheadOfTimeUnits()
 
     {
         QQmlEngine engine;
-        QQmlComponent component(&engine, QUrl("qrc:/data/versionchecks.qml"));
-        QCOMPARE(component.status(), QQmlComponent::Error);
-        QCOMPARE(component.errorString(),
-                 QString("qrc:/data/versionchecks.qml:-1 File was compiled ahead of time with an "
-                         "incompatible version of Qt and the original file cannot be found. Please "
-                         "recompile\n"));
+        CleanlyLoadingComponent component(&engine, QUrl("qrc:/data/versionchecks.qml"));
+        QCOMPARE(component.status(), QQmlComponent::Ready);
     }
 
     Q_ASSERT(temporaryModifiedCachedUnit);
@@ -409,11 +412,23 @@ void tst_qmlcachegen::retainedResources()
     QVERIFY(file.readAll().startsWith("import QtQml 2.0"));
 }
 
+void tst_qmlcachegen::skippedResources()
+{
+    QFile file(":/not/Skip.qml");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QVERIFY(file.readAll().startsWith("import QtQml 2.0"));
+
+    QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
+    const auto *unit = QQmlMetaType::findCachedCompilationUnit(QUrl("qrc:/not/Skip.qml"), &error);
+    QCOMPARE(unit, nullptr);
+    QCOMPARE(error, QQmlMetaType::CachedUnitLookupError::NoUnitFound);
+}
+
 void tst_qmlcachegen::workerScripts()
 {
     QVERIFY(QFile::exists(":/workerscripts/data/worker.js"));
     QVERIFY(QFile::exists(":/workerscripts/data/worker.qml"));
-    QCOMPARE(QFileInfo(":/workerscripts/data/worker.js").size(), 0);
+    QVERIFY(QFileInfo(":/workerscripts/data/worker.js").size() > 0);
 
     QQmlEngine engine;
     CleanlyLoadingComponent component(&engine, QUrl("qrc:///workerscripts/data/worker.qml"));
@@ -502,7 +517,7 @@ void tst_qmlcachegen::trickyPaths()
 {
     QFETCH(QString, filePath);
     QVERIFY2(QFile::exists(filePath), qPrintable(filePath));
-    QCOMPARE(QFileInfo(filePath).size(), 0);
+    QVERIFY(QFileInfo(filePath).size() > 0);
     QQmlEngine engine;
     QQmlComponent component(&engine, QUrl("qrc" + filePath));
     QScopedPointer<QObject> obj(component.create());
@@ -583,7 +598,7 @@ void tst_qmlcachegen::moduleScriptImport()
     QTRY_VERIFY(obj->property("ok").toBool());
 
     QVERIFY(QFile::exists(":/data/script.mjs"));
-    QCOMPARE(QFileInfo(":/data/script.mjs").size(), 0);
+    QVERIFY(QFileInfo(":/data/script.mjs").size() > 0);
 
     {
         auto componentPrivate = QQmlComponentPrivate::get(&component);
@@ -604,6 +619,14 @@ void tst_qmlcachegen::moduleScriptImport()
     }
 }
 
+void tst_qmlcachegen::esModulesViaQJSEngine()
+{
+    QJSEngine engine;
+    QJSValue module = engine.importModule(":/data/module.mjs");
+    QJSValue result = module.property("entry").call();
+    QCOMPARE(result.toString(), "ok");
+}
+
 void tst_qmlcachegen::enums()
 {
     QQmlEngine engine;
@@ -616,7 +639,7 @@ void tst_qmlcachegen::enums()
 void tst_qmlcachegen::sourceFileIndices()
 {
     QVERIFY(QFile::exists(":/data/versionchecks.qml"));
-    QCOMPARE(QFileInfo(":/data/versionchecks.qml").size(), 0);
+    QVERIFY(QFileInfo(":/data/versionchecks.qml").size() > 0);
 
     QQmlMetaType::CachedUnitLookupError error = QQmlMetaType::CachedUnitLookupError::NoError;
     const QV4::CompiledData::Unit *unitFromResources = QQmlMetaType::findCachedCompilationUnit(
@@ -631,8 +654,7 @@ void tst_qmlcachegen::reproducibleCache_data()
     QTest::addColumn<QString>("filePath");
 
     QDir dir(dataDirectory());
-    for (const QString &entry : dir.entryList(QDir::Files)) {
-        QVERIFY(entry.endsWith(".qml") || entry.endsWith(".js") || entry.endsWith(".mjs"));
+    for (const QString &entry : dir.entryList((QStringList() << "*.qml" << "*.js" << "*.mjs"), QDir::Files)) {
         QTest::newRow(entry.toUtf8().constData()) << dir.filePath(entry);
     }
 }
@@ -657,6 +679,26 @@ void tst_qmlcachegen::reproducibleCache()
     const QByteArray contents1 = generate(file.fileName());
     const QByteArray contents2 = generate(file.fileName());
     QCOMPARE(contents1, contents2);
+}
+
+void tst_qmlcachegen::parameterAdjustment()
+{
+    QQmlEngine engine;
+    CleanlyLoadingComponent component(&engine, QUrl("qrc:///data/parameterAdjustment.qml"));
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull()); // Doesn't crash
+}
+
+
+void tst_qmlcachegen::inlineComponent()
+{
+    bool ok = generateCache(testFile("inlineComponentWithId.qml"));
+    QVERIFY(ok);
+    QQmlEngine engine;
+    CleanlyLoadingComponent component(&engine, testFileUrl("inlineComponentWithId.qml"));
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "42");
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull());
 }
 
 QTEST_GUILESS_MAIN(tst_qmlcachegen)

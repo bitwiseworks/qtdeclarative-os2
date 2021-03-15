@@ -1,8 +1,11 @@
 TEMPLATE = lib
-CONFIG += plugin
+CONFIG += plugin qmltypes
 QT += qml quick
 
-DESTDIR = ../Charts
+QML_IMPORT_NAME = Charts
+QML_IMPORT_MAJOR_VERSION = 1
+
+DESTDIR = ../$$QML_IMPORT_NAME
 TARGET = $$qtLibraryTarget(chartsplugin)
 os2:TARGET_SHORT = $$qtLibraryTarget(chrtp)
 os2:CONFIG += target_short_symlink
@@ -12,10 +15,13 @@ HEADERS += piechart.h \
            chartsplugin.h
 
 SOURCES += piechart.cpp \
-           pieslice.cpp \
-           chartsplugin.cpp
+           pieslice.cpp
 
-DESTPATH=$$[QT_INSTALL_EXAMPLES]/qml/tutorials/extending-qml/chapter6-plugins/Charts
+DESTPATH=$$[QT_INSTALL_EXAMPLES]/qml/tutorials/extending-qml/chapter6-plugins/$$QML_IMPORT_NAME
+
+copy_qmltypes.files = $$OUT_PWD/plugins.qmltypes
+copy_qmltypes.path = $$DESTDIR
+COPIES += copy_qmltypes
 
 target.path=$$DESTPATH
 qmldir.files=$$PWD/qmldir

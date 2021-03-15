@@ -54,31 +54,29 @@
 #include <QtCore/QUrl>
 #include <QtCore/QHash>
 #include <QtCore/QDebug>
+#include <private/qtqmlcompilerglobal_p.h>
 #include <private/qqmljsengine_p.h>
-#include <private/qv4global_p.h>
+#include <private/qqmljsdiagnosticmessage_p.h>
 
 QT_BEGIN_NAMESPACE
 
-class QQmlError;
 class QQmlEngine;
-class Q_QML_PRIVATE_EXPORT QQmlDirParser
+class Q_QMLCOMPILER_PRIVATE_EXPORT QQmlDirParser
 {
 public:
-    QQmlDirParser();
-    ~QQmlDirParser();
-
+    void clear();
     bool parse(const QString &source);
 
     bool hasError() const;
-    void setError(const QQmlError &);
-    QList<QQmlError> errors(const QString &uri) const;
+    void setError(const QQmlJS::DiagnosticMessage &);
+    QList<QQmlJS::DiagnosticMessage> errors(const QString &uri) const;
 
     QString typeNamespace() const;
     void setTypeNamespace(const QString &s);
 
     static void checkNonRelative(const char *item, const QString &typeName, const QString &fileName)
     {
-        if (fileName.startsWith(QLatin1Char('/')) || fileName.contains(QLatin1Char(':'))) {
+        if (fileName.startsWith(QLatin1Char('/'))) {
             qWarning() << item << typeName
                        << "is specified with non-relative URL" << fileName << "in a qmldir file."
                        << "URLs in qmldir files should be relative to the qmldir file's directory.";
@@ -87,7 +85,7 @@ public:
 
     struct Plugin
     {
-        Plugin() {}
+        Plugin() = default;
 
         Plugin(const QString &name, const QString &path)
             : name(name), path(path)
@@ -101,7 +99,7 @@ public:
 
     struct Component
     {
-        Component() {}
+        Component() = default;
 
         Component(const QString &typeName, const QString &fileName, int majorVersion, int minorVersion)
             : typeName(typeName), fileName(fileName), majorVersion(majorVersion), minorVersion(minorVersion),
@@ -120,7 +118,7 @@ public:
 
     struct Script
     {
-        Script() {}
+        Script() = default;
 
         Script(const QString &nameSpace, const QString &fileName, int majorVersion, int minorVersion)
             : nameSpace(nameSpace), fileName(fileName), majorVersion(majorVersion), minorVersion(minorVersion)
@@ -134,15 +132,16 @@ public:
         int minorVersion = 0;
     };
 
-    QHash<QString,Component> components() const;
+    QMultiHash<QString,Component> components() const;
     QHash<QString,Component> dependencies() const;
+    QStringList imports() const;
     QList<Script> scripts() const;
     QList<Plugin> plugins() const;
     bool designerSupported() const;
 
     struct TypeInfo
     {
-        TypeInfo() {}
+        TypeInfo() = default;
         TypeInfo(const QString &fileName)
             : fileName(fileName) {}
 
@@ -160,18 +159,19 @@ private:
 private:
     QList<QQmlJS::DiagnosticMessage> _errors;
     QString _typeNamespace;
-    QHash<QString,Component> _components; // multi hash
+    QMultiHash<QString,Component> _components;
     QHash<QString,Component> _dependencies;
+    QStringList _imports;
     QList<Script> _scripts;
     QList<Plugin> _plugins;
-    bool _designerSupported;
+    bool _designerSupported = false;
     QList<TypeInfo> _typeInfos;
     QString _className;
 };
 
-typedef QHash<QString,QQmlDirParser::Component> QQmlDirComponents;
-typedef QList<QQmlDirParser::Script> QQmlDirScripts;
-typedef QList<QQmlDirParser::Plugin> QQmlDirPlugins;
+using QQmlDirComponents = QMultiHash<QString,QQmlDirParser::Component>;
+using QQmlDirScripts = QList<QQmlDirParser::Script>;
+using QQmlDirPlugins = QList<QQmlDirParser::Plugin>;
 
 QDebug &operator<< (QDebug &, const QQmlDirParser::Component &);
 QDebug &operator<< (QDebug &, const QQmlDirParser::Script &);

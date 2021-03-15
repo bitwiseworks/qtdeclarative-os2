@@ -41,7 +41,6 @@
 #include <private/qquickvaluetypes_p.h>
 #include <private/qquickapplication_p.h>
 #include <private/qqmlglobal_p.h>
-#include <private/qv8engine_p.h>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/qdesktopservices.h>
@@ -274,7 +273,53 @@ public:
         return QMatrix4x4();
     }
 
-    static QFont fontFromObject(QQmlV4Handle object, QV4::ExecutionEngine *v4, bool *ok)
+    static QColorSpace colorSpaceFromObject(const QV4::Value &object, QV4::ExecutionEngine *v4, bool *ok)
+    {
+        if (ok)
+            *ok = false;
+        QColorSpace retn;
+        QV4::Scope scope(v4);
+        QV4::ScopedObject obj(scope, object);
+        if (!obj) {
+            if (ok)
+                *ok = false;
+            return retn;
+        }
+
+        QV4::ScopedString s(scope);
+
+        QV4::ScopedValue vName(scope, obj->get((s = v4->newString(QStringLiteral("namedColorSpace")))));
+        if (vName->isInt32()) {
+            if (ok)
+                *ok = true;
+            return QColorSpace((QColorSpace::NamedColorSpace)vName->toInt32());
+        }
+
+        QV4::ScopedValue vPri(scope, obj->get((s = v4->newString(QStringLiteral("primaries")))));
+        QV4::ScopedValue vTra(scope, obj->get((s = v4->newString(QStringLiteral("transferFunction")))));
+        if (!vPri->isInt32() || !vTra->isInt32()) {
+            if (ok)
+                *ok = false;
+            return retn;
+        }
+
+        QColorSpace::Primaries pri = static_cast<QColorSpace::Primaries>(vPri->integerValue());
+        QColorSpace::TransferFunction tra = static_cast<QColorSpace::TransferFunction>(vTra->integerValue());
+        float gamma = 0.0f;
+        if (tra == QColorSpace::TransferFunction::Gamma) {
+            QV4::ScopedValue vGam(scope, obj->get((s = v4->newString(QStringLiteral("gamma")))));
+            if (!vGam->isNumber()) {
+                if (ok)
+                    *ok = false;
+                return retn;
+            }
+            gamma = vGam->toNumber();
+        }
+        if (ok) *ok = true;
+        return QColorSpace(pri, tra, gamma);
+    }
+
+    static QFont fontFromObject(const QV4::Value &object, QV4::ExecutionEngine *v4, bool *ok)
     {
         if (ok)
             *ok = false;
@@ -373,7 +418,7 @@ public:
         return retn;
     }
 
-    static QMatrix4x4 matrix4x4FromObject(QQmlV4Handle object, QV4::ExecutionEngine *v4, bool *ok)
+    static QMatrix4x4 matrix4x4FromObject(const QV4::Value &object, QV4::ExecutionEngine *v4, bool *ok)
     {
         if (ok)
             *ok = false;
@@ -403,6 +448,8 @@ public:
         switch (type) {
         case QMetaType::QColor:
             return &QQuickColorValueType::staticMetaObject;
+        case QMetaType::QColorSpace:
+            return &QQuickColorSpaceValueType::staticMetaObject;
         case QMetaType::QFont:
             return &QQuickFontValueType::staticMetaObject;
         case QMetaType::QVector2D:
@@ -427,6 +474,9 @@ public:
         switch (type) {
         case QMetaType::QColor:
             dst.setValue<QColor>(QColor());
+            return true;
+        case QMetaType::QColorSpace:
+            dst.setValue<QColorSpace>(QColorSpace());
             return true;
         case QMetaType::QFont:
             dst.setValue<QFont>(QFont());
@@ -639,7 +689,7 @@ public:
         return false;
     }
 
-    bool variantFromJsObject(int type, QQmlV4Handle object, QV4::ExecutionEngine *v4, QVariant *v) override
+    bool variantFromJsObject(int type, const QV4::Value &object, QV4::ExecutionEngine *v4, QVariant *v) override
     {
         QV4::Scope scope(v4);
 #ifndef QT_NO_DEBUG
@@ -648,6 +698,9 @@ public:
 #endif
         bool ok = false;
         switch (type) {
+        case QMetaType::QColorSpace:
+            *v = QVariant::fromValue(colorSpaceFromObject(object, v4, &ok));
+            break;
         case QMetaType::QFont:
             *v = QVariant::fromValue(fontFromObject(object, v4, &ok));
             break;
@@ -670,6 +723,8 @@ public:
         switch (type) {
         case QMetaType::QColor:
             return typedEqual<QColor>(lhs, rhs);
+        case QMetaType::QColorSpace:
+            return typedEqual<QColorSpace>(lhs, rhs);
         case QMetaType::QFont:
             return typedEqual<QFont>(lhs, rhs);
         case QMetaType::QVector2D:
@@ -720,7 +775,7 @@ public:
     bool typedRead(const QVariant& src, int dstType, void *dst)
     {
         T *dstT = reinterpret_cast<T *>(dst);
-        if (src.type() == static_cast<uint>(dstType)) {
+        if (src.userType() == dstType) {
             *dstT = src.value<T>();
         } else {
             *dstT = T();
@@ -733,6 +788,8 @@ public:
         switch (dstType) {
         case QMetaType::QColor:
             return typedRead<QColor>(src, dstType, dst);
+        case QMetaType::QColorSpace:
+            return typedRead<QColorSpace>(src, dstType, dst);
         case QMetaType::QFont:
             return typedRead<QFont>(src, dstType, dst);
         case QMetaType::QVector2D:
@@ -767,6 +824,8 @@ public:
         switch (type) {
         case QMetaType::QColor:
             return typedWrite<QColor>(src, dst);
+        case QMetaType::QColorSpace:
+            return typedWrite<QColorSpace>(src, dst);
         case QMetaType::QFont:
             return typedWrite<QFont>(src, dst);
         case QMetaType::QVector2D:

@@ -57,7 +57,6 @@ QSGDistanceFieldGlyphNode::QSGDistanceFieldGlyphNode(QSGRenderContext *context)
 {
     m_geometry.setDrawingMode(GL_TRIANGLES);
     setGeometry(&m_geometry);
-    setFlag(UsePreprocess);
 #ifdef QSG_RUNTIME_DESCRIPTION
     qsgnode_set_description(this, QLatin1String("glyphs"));
 #endif
@@ -105,6 +104,7 @@ void QSGDistanceFieldGlyphNode::setGlyphs(const QPointF &position, const QGlyphR
 
     m_dirtyGeometry = true;
     m_dirtyMaterial = true;
+    setFlag(UsePreprocess);
 
     QSGDistanceFieldGlyphCache *oldCache = m_glyph_cache;
     m_glyph_cache = m_context->distanceFieldGlyphCache(m_glyphs.rawFont());
@@ -152,13 +152,10 @@ void QSGDistanceFieldGlyphNode::update()
 
 void QSGDistanceFieldGlyphNode::preprocess()
 {
-    Q_ASSERT(m_glyph_cache);
-
-    m_glyph_cache->processPendingGlyphs();
-    m_glyph_cache->update();
-
     if (m_dirtyGeometry)
         updateGeometry();
+
+    setFlag(UsePreprocess, false);
 }
 
 void QSGDistanceFieldGlyphNode::invalidateGlyphs(const QVector<quint32> &glyphs)
@@ -169,6 +166,7 @@ void QSGDistanceFieldGlyphNode::invalidateGlyphs(const QVector<quint32> &glyphs)
     for (int i = 0; i < glyphs.count(); ++i) {
         if (m_allGlyphIndexesLookup.contains(glyphs.at(i))) {
             m_dirtyGeometry = true;
+            setFlag(UsePreprocess);
             return;
         }
     }
@@ -224,15 +222,19 @@ void QSGDistanceFieldGlyphNode::updateGeometry()
         const QPointF position = positions.at(i);
 
         const QSGDistanceFieldGlyphCache::Texture *texture = m_glyph_cache->glyphTexture(glyphIndex);
-        if (texture->textureId && !m_texture)
+        if ((!texture->rhiBased && texture->textureId && !m_texture)
+                || (texture->rhiBased && texture->texture && !m_texture))
+        {
             m_texture = texture;
+        }
 
         // As we use UNSIGNED_SHORT indexing in the geometry, we overload the
-        // "glyphsInOtherTextures" concept as overflow for if there are more than
-        // 65536 vertices to render which would otherwise exceed the maximum index
-        // size.  This will cause sub-nodes to be recursively created to handle any
-        // number of glyphs.
-        if (m_texture != texture || vp.size() >= 65536) {
+        // "glyphsInOtherTextures" concept as overflow for if there are more
+        // than 65535 vertices to render which would otherwise exceed the
+        // maximum index size. (leave 0xFFFF unused in order not to clash with
+        // primitive restart) This will cause sub-nodes to be recursively
+        // created to handle any number of glyphs.
+        if (m_texture != texture || vp.size() >= 65535) {
             if (texture->textureId) {
                 GlyphInfo &glyphInfo = glyphsInOtherTextures[texture];
                 glyphInfo.indexes.append(glyphIndex);

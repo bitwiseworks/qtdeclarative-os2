@@ -59,9 +59,7 @@ class QQmlComponentPrivate;
 class QQmlComponentAttached;
 
 namespace QV4 {
-namespace CompiledData {
-struct CompilationUnit;
-}
+class ExecutableCompilationUnit;
 }
 
 class Q_QML_EXPORT QQmlComponent : public QObject
@@ -72,6 +70,9 @@ class Q_QML_EXPORT QQmlComponent : public QObject
     Q_PROPERTY(qreal progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
     Q_PROPERTY(QUrl url READ url CONSTANT)
+    QML_NAMED_ELEMENT(Component)
+    QML_ATTACHED(QQmlComponentAttached)
+    Q_CLASSINFO("QML.Builtin", "QML")
 
 public:
     enum CompilationMode { PreferSynchronous, Asynchronous };
@@ -102,6 +103,8 @@ public:
     QUrl url() const;
 
     virtual QObject *create(QQmlContext *context = nullptr);
+    QObject *createWithInitialProperties(const QVariantMap& initialProperties, QQmlContext *context = nullptr);
+    void setInitialProperties(QObject *component, const QVariantMap &properties);
     virtual QObject *beginCreate(QQmlContext *);
     virtual void completeCreate();
 
@@ -128,16 +131,37 @@ protected:
     Q_INVOKABLE void incubateObject(QQmlV4Function *);
 
 private:
-    QQmlComponent(QQmlEngine *, QV4::CompiledData::CompilationUnit *compilationUnit, int, QObject *parent);
+    QQmlComponent(QQmlEngine *, QV4::ExecutableCompilationUnit *compilationUnit, int,
+                  QObject *parent);
 
     Q_DISABLE_COPY(QQmlComponent)
     friend class QQmlTypeData;
     friend class QQmlObjectCreator;
 };
 
-QT_END_NAMESPACE
 
+// Don't do this at home.
+namespace QQmlPrivate {
+
+// Generally you cannot use QQmlComponentAttached as attached properties object in derived classes.
+// It is private.
+template<class T>
+struct OverridableAttachedType<T, QQmlComponentAttached>
+{
+    using Type = void;
+};
+
+// QQmlComponent itself is allowed to use QQmlComponentAttached, though.
+template<>
+struct OverridableAttachedType<QQmlComponent, QQmlComponentAttached>
+{
+    using Type = QQmlComponentAttached;
+};
+
+} // namespace QQmlPrivate
+
+
+QT_END_NAMESPACE
 QML_DECLARE_TYPE(QQmlComponent)
-QML_DECLARE_TYPEINFO(QQmlComponent, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif // QQMLCOMPONENT_H

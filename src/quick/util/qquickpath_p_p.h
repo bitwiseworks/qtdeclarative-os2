@@ -80,10 +80,12 @@ public:
     QList<QQuickPath::AttributePoint> _attributePoints;
     QStringList _attributes;
     QList<QQuickCurve*> _pathCurves;
+    QList<QQuickPathText*> _pathTexts;
     mutable QQuickCachedBezier prevBez;
     QQmlNullableValue<qreal> startX;
     QQmlNullableValue<qreal> startY;
     qreal pathLength = 0;
+    QSizeF scale = QSizeF(1, 1);
     bool closed = false;
     bool componentComplete = true;
     bool isShapePath = false;

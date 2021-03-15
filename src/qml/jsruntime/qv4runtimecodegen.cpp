@@ -37,10 +37,12 @@
 **
 ****************************************************************************/
 
+#include "qv4engine_p.h"
 #include "qv4runtimecodegen_p.h"
-#include "qv4compilerscanfunctions_p.h"
+#include <private/qv4compilerscanfunctions_p.h>
 
 using namespace QV4;
+using namespace QQmlJS;
 
 void RuntimeCodegen::generateFromFunctionExpression(const QString &fileName,
                                                     const QString &sourceCode,
@@ -58,26 +60,28 @@ void RuntimeCodegen::generateFromFunctionExpression(const QString &fileName,
     scan(ast);
     scan.leaveEnvironment();
 
-    if (hasError)
+    if (hasError())
         return;
 
     int index = defineFunction(ast->name.toString(), ast, ast->formals, ast->body);
     _module->rootContext = _module->functions.at(index);
 }
 
-void RuntimeCodegen::throwSyntaxError(const AST::SourceLocation &loc, const QString &detail)
+void RuntimeCodegen::throwSyntaxError(const SourceLocation &loc, const QString &detail)
 {
-    if (hasError)
+    if (hasError())
         return;
-    hasError = true;
+
+    Codegen::throwSyntaxError(loc, detail);
     engine->throwSyntaxError(detail, _module->fileName, loc.startLine, loc.startColumn);
 }
 
-void RuntimeCodegen::throwReferenceError(const AST::SourceLocation &loc, const QString &detail)
+void RuntimeCodegen::throwReferenceError(const SourceLocation &loc, const QString &detail)
 {
-    if (hasError)
+    if (hasError())
         return;
-    hasError = true;
+
+    Codegen::throwReferenceError(loc, detail);
     engine->throwReferenceError(detail, _module->fileName, loc.startLine, loc.startColumn);
 }
 

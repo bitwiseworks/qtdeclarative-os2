@@ -64,6 +64,7 @@ private slots:
     void activeFocusOnTab8();
     void activeFocusOnTab9();
     void activeFocusOnTab10();
+    void activeFocusOnTab_infiniteLoop_data();
     void activeFocusOnTab_infiniteLoop();
 
     void nextItemInFocusChain();
@@ -76,8 +77,10 @@ private slots:
     void qtbug_50516_2();
 
     void keys();
+#if QT_CONFIG(shortcut)
     void standardKeys_data();
     void standardKeys();
+#endif
     void keysProcessingOrder();
     void keysim();
     void keysForward();
@@ -89,6 +92,7 @@ private slots:
     void keyNavigation_implicitDestroy();
     void keyNavigation_focusReason();
     void keyNavigation_loop();
+    void keyNavigation_repeater();
     void layoutMirroring();
     void layoutMirroringWindow();
     void layoutMirroringIllegalParent();
@@ -1025,12 +1029,20 @@ void tst_QQuickItem::activeFocusOnTab10()
     delete window;
 }
 
+void tst_QQuickItem::activeFocusOnTab_infiniteLoop_data()
+{
+    QTest::addColumn<QUrl>("source");
+    QTest::newRow("infiniteLoop") << testFileUrl("activeFocusOnTab_infiniteLoop.qml");  // QTBUG-68271
+    QTest::newRow("infiniteLoop2") << testFileUrl("activeFocusOnTab_infiniteLoop2.qml");// QTBUG-81510
+}
+
 void tst_QQuickItem::activeFocusOnTab_infiniteLoop()
 {
-    // see QTBUG-68271
+    QFETCH(QUrl, source);
+
     // create a window where the currently focused item is not visible
     QScopedPointer<QQuickView>window(new QQuickView());
-    window->setSource(testFileUrl("activeFocusOnTab_infiniteLoop.qml"));
+    window->setSource(source);
     window->show();
     auto *hiddenChild = findItem<QQuickItem>(window->rootObject(), "hiddenChild");
     QVERIFY(hiddenChild);
@@ -1038,6 +1050,8 @@ void tst_QQuickItem::activeFocusOnTab_infiniteLoop()
     // move the focus - this used to result in an infinite loop
     auto *item = hiddenChild->nextItemInFocusChain();
     // focus is moved to the root object since there is no other candidate
+    QCOMPARE(item, window->rootObject());
+    item = hiddenChild->nextItemInFocusChain(false);
     QCOMPARE(item, window->rootObject());
 }
 
@@ -1429,6 +1443,8 @@ void tst_QQuickItem::keys()
     delete testObject;
 }
 
+#if QT_CONFIG(shortcut)
+
 Q_DECLARE_METATYPE(QEvent::Type);
 Q_DECLARE_METATYPE(QKeySequence::StandardKey);
 
@@ -1486,6 +1502,8 @@ void tst_QQuickItem::standardKeys()
     QCOMPARE(item->property("pressed").toBool(), pressed);
     QCOMPARE(item->property("released").toBool(), released);
 }
+
+#endif // QT_CONFIG(shortcut)
 
 void tst_QQuickItem::keysProcessingOrder()
 {
@@ -2273,6 +2291,22 @@ void tst_QQuickItem::keyNavigation_loop()
     delete window;
 }
 
+void tst_QQuickItem::keyNavigation_repeater()
+{
+    // QTBUG-83356
+    QScopedPointer<QQuickView> window(new QQuickView());
+    window->setBaseSize(QSize(240,320));
+
+    window->setSource(testFileUrl("keynavigationtest_repeater.qml"));
+    window->show();
+    window->requestActivate();
+
+    QVariant result;
+    QVERIFY(QMetaObject::invokeMethod(window->rootObject(), "verify",
+            Q_RETURN_ARG(QVariant, result)));
+    QVERIFY(result.toBool());
+}
+
 void tst_QQuickItem::smooth()
 {
     QQmlComponent component(&engine);
@@ -2385,7 +2419,15 @@ void tst_QQuickItem::mapCoordinates()
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
     QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapToItem(b, QPointF(x, y)));
 
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAToBPoint",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
+    QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapToItem(b, QPointF(x, y)));
+
     QVERIFY(QMetaObject::invokeMethod(root, "mapAFromB",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
+    QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapFromItem(b, QPointF(x, y)));
+
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAFromBPoint",
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
     QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapFromItem(b, QPointF(x, y)));
 
@@ -2401,7 +2443,15 @@ void tst_QQuickItem::mapCoordinates()
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
     QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapToGlobal(QPointF(x, y)));
 
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAToGlobalPoint",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
+    QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapToGlobal(QPointF(x, y)));
+
     QVERIFY(QMetaObject::invokeMethod(root, "mapAFromGlobal",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
+    QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapFromGlobal(QPointF(x, y)));
+
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAFromGlobalPoint",
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y)));
     QCOMPARE(result.value<QPointF>(), qobject_cast<QQuickItem*>(a)->mapFromGlobal(QPointF(x, y)));
 
@@ -2466,7 +2516,15 @@ void tst_QQuickItem::mapCoordinatesRect()
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y), Q_ARG(QVariant, width), Q_ARG(QVariant, height)));
     QCOMPARE(result.value<QRectF>(), qobject_cast<QQuickItem*>(a)->mapRectToItem(b, QRectF(x, y, width, height)));
 
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAToBRect",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y), Q_ARG(QVariant, width), Q_ARG(QVariant, height)));
+    QCOMPARE(result.value<QRectF>(), qobject_cast<QQuickItem*>(a)->mapRectToItem(b, QRectF(x, y, width, height)));
+
     QVERIFY(QMetaObject::invokeMethod(root, "mapAFromB",
+            Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y), Q_ARG(QVariant, width), Q_ARG(QVariant, height)));
+    QCOMPARE(result.value<QRectF>(), qobject_cast<QQuickItem*>(a)->mapRectFromItem(b, QRectF(x, y, width, height)));
+
+    QVERIFY(QMetaObject::invokeMethod(root, "mapAFromBRect",
             Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, x), Q_ARG(QVariant, y), Q_ARG(QVariant, width), Q_ARG(QVariant, height)));
     QCOMPARE(result.value<QRectF>(), qobject_cast<QQuickItem*>(a)->mapRectFromItem(b, QRectF(x, y, width, height)));
 
@@ -3358,7 +3416,7 @@ void tst_QQuickItem::grab()
 {
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabToImage not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabToImage not functional on offscreen/minimal platforms");
 
     QQuickView view;
     view.setSource(testFileUrl("grabToImage.qml"));

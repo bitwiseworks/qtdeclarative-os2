@@ -56,14 +56,17 @@
 
 #include <private/qobject_p.h>
 #include <private/qtqmlglobal_p.h>
-#include <private/qqmlpropertycache_p.h>
+#include <private/qqmlrefcount_p.h>
+#include <private/qqmlcontext_p.h>
 #include <private/qqmlboundsignalexpressionpointer_p.h>
+#include <private/qqmlpropertydata_p.h>
 
 QT_BEGIN_NAMESPACE
 
 class QQmlContext;
 class QQmlEnginePrivate;
 class QQmlJavaScriptExpression;
+class QQmlMetaObject;
 
 class Q_QML_PRIVATE_EXPORT QQmlPropertyPrivate : public QQmlRefCount
 {
@@ -104,9 +107,9 @@ public:
     static bool writeValueProperty(QObject *,
                                    const QQmlPropertyData &, const QQmlPropertyData &valueTypeData,
                                    const QVariant &, QQmlContextData *,
-                                   QQmlPropertyData::WriteFlags flags = nullptr);
+                                   QQmlPropertyData::WriteFlags flags = {});
     static bool write(QObject *, const QQmlPropertyData &, const QVariant &,
-                      QQmlContextData *, QQmlPropertyData::WriteFlags flags = nullptr);
+                      QQmlContextData *, QQmlPropertyData::WriteFlags flags = {});
     static void findAliasTarget(QObject *, QQmlPropertyIndex, QObject **, QQmlPropertyIndex *);
 
     enum BindingFlag {

@@ -67,7 +67,7 @@ QQuickPixmap* QQuickAnimatedImagePrivate::infoForCurrentFrame(QQmlEngine *engine
                                 .arg(current));
         }
         if (!requestedUrl.isEmpty()) {
-            if (QQuickPixmap::isCached(requestedUrl, QSize(), QQuickImageProviderOptions()))
+            if (QQuickPixmap::isCached(requestedUrl, QRect(), QSize(), 0, QQuickImageProviderOptions()))
                 pixmap = new QQuickPixmap(engine, requestedUrl);
             else
                 pixmap = new QQuickPixmap(requestedUrl, movie->currentImage());
@@ -129,16 +129,18 @@ QQuickPixmap* QQuickAnimatedImagePrivate::infoForCurrentFrame(QQmlEngine *engine
 
     This property holds the URL that refers to the source image.
 
-    AnimatedImage can handle any image format supported by Qt, loaded from any
-    URL scheme supported by Qt.
-
-    \sa QQuickImageProvider
+    AnimatedImage can handle any image format supported by Qt, loaded
+    from any URL scheme supported by Qt. It is however not compatible
+    with QQuickImageProvider.
 */
 
 QQuickAnimatedImage::QQuickAnimatedImage(QQuickItem *parent)
     : QQuickImage(*(new QQuickAnimatedImagePrivate), parent)
 {
     connect(this, &QQuickImageBase::cacheChanged, this, &QQuickAnimatedImage::onCacheChanged);
+    connect(this, &QQuickImageBase::currentFrameChanged, this, &QQuickAnimatedImage::frameChanged);
+    connect(this, &QQuickImageBase::currentFrameChanged, this, &QQuickAnimatedImage::currentFrameChanged);
+    connect(this, &QQuickImageBase::frameCountChanged, this, &QQuickAnimatedImage::frameCountChanged);
 }
 
 QQuickAnimatedImage::~QQuickAnimatedImage()
@@ -464,7 +466,7 @@ void QQuickAnimatedImage::movieUpdate()
 
     if (d->movie) {
         d->setPixmap(*d->infoForCurrentFrame(qmlEngine(this)));
-        emit frameChanged();
+        emit QQuickImageBase::currentFrameChanged();
     }
 }
 

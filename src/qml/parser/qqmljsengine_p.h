@@ -52,8 +52,9 @@
 //
 
 #include "qqmljsglobal_p.h"
-#include "qqmljsmemorypool_p.h"
-#include "qqmljssourcelocation_p.h"
+#include <private/qqmljssourcelocation_p.h>
+
+#include <private/qqmljsmemorypool_p.h>
 
 #include <QtCore/qstring.h>
 #include <QtCore/qset.h>
@@ -91,34 +92,12 @@ public:
     }
 };
 
-
-class QML_PARSER_EXPORT DiagnosticMessage
-{
-public:
-    enum Kind { Hint, Warning, Error };
-
-    DiagnosticMessage() {}
-
-    DiagnosticMessage(Kind kind, const AST::SourceLocation &loc, const QString &message)
-        : kind(kind), loc(loc), message(message) {}
-
-    bool isWarning() const
-    { return kind == Warning; }
-
-    bool isError() const
-    { return kind == Error; }
-
-    Kind kind = Error;
-    AST::SourceLocation loc;
-    QString message;
-};
-
 class QML_PARSER_EXPORT Engine
 {
     Lexer *_lexer;
     Directives *_directives;
     MemoryPool _pool;
-    QList<AST::SourceLocation> _comments;
+    QList<SourceLocation> _comments;
     QString _extraCode;
     QString _code;
 
@@ -130,7 +109,7 @@ public:
     const QString &code() const { return _code; }
 
     void addComment(int pos, int len, int line, int col);
-    QList<AST::SourceLocation> comments() const;
+    QList<SourceLocation> comments() const;
 
     Lexer *lexer() const;
     void setLexer(Lexer *lexer);

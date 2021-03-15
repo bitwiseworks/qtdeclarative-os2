@@ -67,7 +67,8 @@ class Q_QUICK_PRIVATE_EXPORT QQuickWindowQmlImpl : public QQuickWindow, public Q
 
     Q_PROPERTY(bool visible READ isVisible WRITE setVisible NOTIFY visibleChanged)
     Q_PROPERTY(Visibility visibility READ visibility WRITE setVisibility NOTIFY visibilityChanged)
-    Q_PROPERTY(QObject *screen READ screen WRITE setScreen NOTIFY screenChanged REVISION 2)
+    Q_PROPERTY(QObject *screen READ screen WRITE setScreen NOTIFY screenChanged REVISION 3)
+    QML_ATTACHED(QQuickWindowAttached)
 
 public:
     QQuickWindowQmlImpl(QWindow *parent = nullptr);
@@ -83,7 +84,7 @@ public:
 Q_SIGNALS:
     void visibleChanged(bool arg);
     void visibilityChanged(QWindow::Visibility visibility);
-    Q_REVISION(2) void screenChanged();
+    Q_REVISION(3) void screenChanged();
 
 protected:
     void classBegin() override;
@@ -93,19 +94,15 @@ private Q_SLOTS:
     void setWindowVisibility();
 
 private:
+    bool transientParentVisible();
+
+private:
     Q_DISABLE_COPY(QQuickWindowQmlImpl)
     Q_DECLARE_PRIVATE(QQuickWindowQmlImpl)
-};
-
-class Q_QUICK_PRIVATE_EXPORT QQuickWindowModule
-{
-public:
-    static void defineModule();
 };
 
 QT_END_NAMESPACE
 
 QML_DECLARE_TYPE(QQuickWindowQmlImpl)
-QML_DECLARE_TYPEINFO(QQuickWindowQmlImpl, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif

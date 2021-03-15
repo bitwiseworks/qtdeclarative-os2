@@ -45,10 +45,11 @@
 
 #include <algorithm>
 
+using namespace QQmlJS;
+
 int filterResourceFile(const QString &input, const QString &output);
-bool generateLoader(const QStringList &compiledFiles, const QStringList &retainedFiles,
-                    const QString &output, const QStringList &resourceFileMappings,
-                    QString *errorString);
+bool generateLoader(const QStringList &compiledFiles, const QString &output,
+                    const QStringList &resourceFileMappings, QString *errorString);
 QString symbolNamespaceForPath(const QString &relativePath);
 
 QSet<QString> illegalNames;
@@ -65,6 +66,7 @@ struct Error
     void print();
     Error augment(const QString &contextErrorMessage) const;
     void appendDiagnostics(const QString &inputFileName, const QList<QQmlJS::DiagnosticMessage> &diagnostics);
+    void appendDiagnostic(const QString &inputFileName, const DiagnosticMessage &diagnostic);
 };
 
 void Error::print()
@@ -94,13 +96,17 @@ QString diagnosticErrorMessage(const QString &fileName, const QQmlJS::Diagnostic
     return message;
 }
 
+void Error::appendDiagnostic(const QString &inputFileName, const DiagnosticMessage &diagnostic)
+{
+    if (!message.isEmpty())
+        message += QLatin1Char('\n');
+    message += diagnosticErrorMessage(inputFileName, diagnostic);
+}
+
 void Error::appendDiagnostics(const QString &inputFileName, const QList<DiagnosticMessage> &diagnostics)
 {
-    for (const QQmlJS::DiagnosticMessage &parseError: diagnostics) {
-        if (!message.isEmpty())
-            message += QLatin1Char('\n');
-        message += diagnosticErrorMessage(inputFileName, parseError);
-    }
+    for (const QQmlJS::DiagnosticMessage &diagnostic: diagnostics)
+        appendDiagnostic(inputFileName, diagnostic);
 }
 
 // Ensure that ListElement objects keep all property assignments in their string form
@@ -169,7 +175,7 @@ static bool checkArgumentsObjectUseInSignalHandlers(const QmlIR::Document &doc, 
     return true;
 }
 
-using SaveFunction = std::function<bool (const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &, QString *)>;
+using SaveFunction = std::function<bool(const QV4::CompiledData::SaveableUnitPointer &, QString *)>;
 
 static bool compileQmlFile(const QString &inputFileName, SaveFunction saveFunction, Error *error)
 {
@@ -200,10 +206,7 @@ static bool compileQmlFile(const QString &inputFileName, SaveFunction saveFuncti
     annotateListElements(&irDocument);
 
     {
-        QmlIR::JSCodeGen v4CodeGen(irDocument.code,
-                                   &irDocument.jsGenerator, &irDocument.jsModule,
-                                   &irDocument.jsParserEngine, irDocument.program,
-                                   &irDocument.jsGenerator.stringTable, illegalNames);
+        QmlIR::JSCodeGen v4CodeGen(&irDocument, illegalNames);
         for (QmlIR::Object *object: qAsConst(irDocument.objects)) {
             if (object->functionsAndExpressions->count == 0)
                 continue;
@@ -211,9 +214,8 @@ static bool compileQmlFile(const QString &inputFileName, SaveFunction saveFuncti
             for (QmlIR::CompiledFunctionOrExpression *foe = object->functionsAndExpressions->first; foe; foe = foe->next)
                 functionsToCompile << *foe;
             const QVector<int> runtimeFunctionIndices = v4CodeGen.generateJSCodeForFunctionsAndBindings(functionsToCompile);
-            QList<QQmlJS::DiagnosticMessage> jsErrors = v4CodeGen.errors();
-            if (!jsErrors.isEmpty()) {
-                error->appendDiagnostics(inputFileName, jsErrors);
+            if (v4CodeGen.hasError()) {
+                error->appendDiagnostic(inputFileName, v4CodeGen.error());
                 return false;
             }
 
@@ -229,11 +231,13 @@ static bool compileQmlFile(const QString &inputFileName, SaveFunction saveFuncti
         QmlIR::QmlUnitGenerator generator;
         irDocument.javaScriptCompilationUnit = v4CodeGen.generateCompilationUnit(/*generate unit*/false);
         generator.generate(irDocument);
-        QV4::CompiledData::Unit *unit = const_cast<QV4::CompiledData::Unit*>(irDocument.javaScriptCompilationUnit->data);
-        unit->flags |= QV4::CompiledData::Unit::StaticData;
-        unit->flags |= QV4::CompiledData::Unit::PendingTypeCompilation;
 
-        if (!saveFunction(irDocument.javaScriptCompilationUnit, &error->message))
+        const quint32 saveFlags
+                = QV4::CompiledData::Unit::StaticData
+                | QV4::CompiledData::Unit::PendingTypeCompilation;
+        QV4::CompiledData::SaveableUnitPointer saveable(irDocument.javaScriptCompilationUnit.data,
+                                                        saveFlags);
+        if (!saveFunction(saveable, &error->message))
             return false;
     }
     return true;
@@ -241,7 +245,7 @@ static bool compileQmlFile(const QString &inputFileName, SaveFunction saveFuncti
 
 static bool compileJSFile(const QString &inputFileName, const QString &inputFileUrl, SaveFunction saveFunction, Error *error)
 {
-    QQmlRefPointer<QV4::CompiledData::CompilationUnit> unit;
+    QV4::CompiledData::CompilationUnit unit;
 
     QString sourceCode;
     {
@@ -262,9 +266,10 @@ static bool compileJSFile(const QString &inputFileName, const QString &inputFile
         QList<QQmlJS::DiagnosticMessage> diagnostics;
         // Precompiled files are relocatable and the final location will be set when loading.
         QString url;
-        unit = QV4::ExecutionEngine::compileModule(/*debugMode*/false, url, sourceCode, QDateTime(), &diagnostics);
+        unit = QV4::Compiler::Codegen::compileModule(/*debugMode*/false, url, sourceCode,
+                                                     QDateTime(), &diagnostics);
         error->appendDiagnostics(inputFileName, diagnostics);
-        if (!unit)
+        if (!unit.unitData())
             return false;
     } else {
         QmlIR::Document irDocument(/*debugMode*/false);
@@ -302,14 +307,11 @@ static bool compileJSFile(const QString &inputFileName, const QString &inputFile
         }
 
         {
-            QmlIR::JSCodeGen v4CodeGen(irDocument.code, &irDocument.jsGenerator,
-                                       &irDocument.jsModule, &irDocument.jsParserEngine,
-                                       irDocument.program, &irDocument.jsGenerator.stringTable, illegalNames);
+            QmlIR::JSCodeGen v4CodeGen(&irDocument, illegalNames);
             v4CodeGen.generateFromProgram(inputFileName, inputFileUrl, sourceCode, program,
                                           &irDocument.jsModule, QV4::Compiler::ContextType::ScriptImportedByQML);
-            QList<QQmlJS::DiagnosticMessage> jsErrors = v4CodeGen.errors();
-            if (!jsErrors.isEmpty()) {
-                error->appendDiagnostics(inputFileName, jsErrors);
+            if (v4CodeGen.hasError()) {
+                error->appendDiagnostic(inputFileName, v4CodeGen.error());
                 return false;
             }
 
@@ -320,19 +322,22 @@ static bool compileJSFile(const QString &inputFileName, const QString &inputFile
             irDocument.javaScriptCompilationUnit = v4CodeGen.generateCompilationUnit(/*generate unit*/false);
             QmlIR::QmlUnitGenerator generator;
             generator.generate(irDocument);
-            QV4::CompiledData::Unit *unitData = const_cast<QV4::CompiledData::Unit*>(irDocument.javaScriptCompilationUnit->data);
-            unitData->flags |= QV4::CompiledData::Unit::StaticData;
-            unit = irDocument.javaScriptCompilationUnit;
+            unit = std::move(irDocument.javaScriptCompilationUnit);
         }
     }
 
-    return saveFunction(unit, &error->message);
+    return saveFunction(QV4::CompiledData::SaveableUnitPointer(unit.data), &error->message);
 }
 
 static bool saveUnitAsCpp(const QString &inputFileName, const QString &outputFileName,
-                          const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &unit, QString *errorString)
+                          const QV4::CompiledData::SaveableUnitPointer &unit,
+                          QString *errorString)
 {
+#if QT_CONFIG(temporaryfile)
     QSaveFile f(outputFileName);
+#else
+    QFile f(outputFileName);
+#endif
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         *errorString = f.errorString();
         return false;
@@ -364,43 +369,38 @@ static bool saveUnitAsCpp(const QString &inputFileName, const QString &outputFil
     if (!writeStr(QByteArrayLiteral(" {\nextern const unsigned char qmlData alignas(16) [] = {\n")))
         return false;
 
-    QByteArray hexifiedData;
-    {
-        QByteArray modifiedUnit;
-        modifiedUnit.resize(unit->data->unitSize);
-        memcpy(modifiedUnit.data(), unit->data, unit->data->unitSize);
-        const char *dataPtr = modifiedUnit.data();
-        QV4::CompiledData::Unit *unitPtr;
-        memcpy(&unitPtr, &dataPtr, sizeof(unitPtr));
-        unitPtr->flags |= QV4::CompiledData::Unit::StaticData;
-
-        QTextStream stream(&hexifiedData);
-        const uchar *begin = reinterpret_cast<const uchar *>(modifiedUnit.constData());
-        const uchar *end = begin + unit->data->unitSize;
-        stream << hex;
-        int col = 0;
-        for (const uchar *data = begin; data < end; ++data, ++col) {
-            if (data > begin)
-                stream << ',';
-            if (col % 8 == 0) {
-                stream << '\n';
-                col = 0;
+    unit.saveToDisk<uchar>([&writeStr](const uchar *begin, quint32 size) {
+        QByteArray hexifiedData;
+        {
+            QTextStream stream(&hexifiedData);
+            const uchar *end = begin + size;
+            stream << Qt::hex;
+            int col = 0;
+            for (const uchar *data = begin; data < end; ++data, ++col) {
+                if (data > begin)
+                    stream << ',';
+                if (col % 8 == 0) {
+                    stream << '\n';
+                    col = 0;
+                }
+                stream << "0x" << *data;
             }
-            stream << "0x" << *data;
+            stream << '\n';
         }
-        stream << '\n';
-    };
+        return writeStr(hexifiedData);
+    });
 
-    if (!writeStr(hexifiedData))
-        return false;
+
 
     if (!writeStr("};\n}\n}\n"))
         return false;
 
+#if QT_CONFIG(temporaryfile)
     if (!f.commit()) {
         *errorString = f.errorString();
         return false;
     }
+#endif
 
     return true;
 }
@@ -424,8 +424,6 @@ int main(int argc, char **argv)
     parser.addOption(resourceFileMappingOption);
     QCommandLineOption resourceOption(QStringLiteral("resource"), QCoreApplication::translate("main", "Qt resource file that might later contain one of the compiled files"), QCoreApplication::translate("main", "resource-file-name"));
     parser.addOption(resourceOption);
-    QCommandLineOption retainOption(QStringLiteral("retain"), QCoreApplication::translate("main", "Qt resource file the contents of which should not be replaced by empty stubs"), QCoreApplication::translate("main", "resource-file-name"));
-    parser.addOption(retainOption);
     QCommandLineOption resourcePathOption(QStringLiteral("resource-path"), QCoreApplication::translate("main", "Qt resource file path corresponding to the file being compiled"), QCoreApplication::translate("main", "resource-path"));
     parser.addOption(resourcePathOption);
 
@@ -473,12 +471,9 @@ int main(int argc, char **argv)
 
     if (target == GenerateLoader) {
         ResourceFileMapper mapper(sources);
-        ResourceFileMapper retain(parser.values(retainOption));
 
         Error error;
-        QStringList retainedFiles = retain.qmlCompilerFiles();
-        std::sort(retainedFiles.begin(), retainedFiles.end());
-        if (!generateLoader(mapper.qmlCompilerFiles(), retainedFiles, outputFileName,
+        if (!generateLoader(mapper.qmlCompilerFiles(), outputFileName,
                             parser.values(resourceFileMappingOption), &error.message)) {
             error.augment(QLatin1String("Error generating loader stub: ")).print();
             return EXIT_FAILURE;
@@ -524,13 +519,20 @@ int main(int argc, char **argv)
 
         inputFileUrl = QStringLiteral("qrc://") + inputResourcePath;
 
-        saveFunction = [inputResourcePath, outputFileName](const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &unit, QString *errorString) {
+        saveFunction = [inputResourcePath, outputFileName](
+                               const QV4::CompiledData::SaveableUnitPointer &unit,
+                               QString *errorString) {
             return saveUnitAsCpp(inputResourcePath, outputFileName, unit, errorString);
         };
 
     } else {
-        saveFunction = [outputFileName](const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &unit, QString *errorString) {
-            return unit->saveToDisk(outputFileName, errorString);
+        saveFunction = [outputFileName](const QV4::CompiledData::SaveableUnitPointer &unit,
+                                        QString *errorString) {
+            return unit.saveToDisk<char>(
+                    [&outputFileName, errorString](const char *data, quint32 size) {
+                        return QV4::CompiledData::SaveableUnitPointer::writeDataToFile(
+                                outputFileName, data, size, errorString);
+            });
         };
     }
 

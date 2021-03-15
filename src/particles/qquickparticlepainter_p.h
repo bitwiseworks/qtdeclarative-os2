@@ -64,6 +64,9 @@ class QQuickParticlePainter : public QQuickItem
     Q_PROPERTY(QQuickParticleSystem* system READ system WRITE setSystem NOTIFY systemChanged)
     Q_PROPERTY(QStringList groups READ groups WRITE setGroups NOTIFY groupsChanged)
 
+    QML_NAMED_ELEMENT(ParticlePainter)
+    QML_UNCREATABLE("Abstract type. Use one of the inheriting types instead.")
+
 public: // data
     typedef QQuickParticleVarLengthArray<QQuickParticleGroupData::ID, 4> GroupIDs;
 
@@ -141,6 +144,7 @@ protected:
     QPointF m_systemOffset;
 
     QQuickWindow *m_window;
+    bool m_windowChanged;
 
 private: // methods
     void recalculateGroupIds() const;

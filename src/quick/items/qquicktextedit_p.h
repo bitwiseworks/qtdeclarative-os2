@@ -112,6 +112,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextEdit : public QQuickImplicitSizeItem
     Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
     Q_PROPERTY(QString preeditText READ preeditText NOTIFY preeditTextChanged REVISION 7)
     Q_PROPERTY(qreal tabStopDistance READ tabStopDistance WRITE setTabStopDistance NOTIFY tabStopDistanceChanged REVISION 10)
+    QML_NAMED_ELEMENT(TextEdit)
 
 public:
     QQuickTextEdit(QQuickItem *parent=nullptr);
@@ -134,7 +135,8 @@ public:
     enum TextFormat {
         PlainText = Qt::PlainText,
         RichText = Qt::RichText,
-        AutoText = Qt::AutoText
+        AutoText = Qt::AutoText,
+        MarkdownText = Qt::MarkdownText
     };
     Q_ENUM(TextFormat)
 
@@ -375,6 +377,7 @@ private Q_SLOTS:
     void invalidateBlock(const QTextBlock &block);
     void updateCursor();
     void q_linkHovered(const QString &link);
+    void q_markerHovered(bool hovered);
     void q_updateAlignment();
     void updateSize();
     void triggerPreprocess();

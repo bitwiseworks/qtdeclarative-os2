@@ -43,6 +43,7 @@
 #include <QQmlIncubationController>
 #include <QTemporaryDir>
 #include <private/qqmlengine_p.h>
+#include <private/qqmltypedata_p.h>
 #include <QQmlAbstractUrlInterceptor>
 
 class tst_qqmlengine : public QQmlDataTest
@@ -82,6 +83,8 @@ private slots:
     void singletonInstance();
     void aggressiveGc();
     void cachedGetterLookup_qtbug_75335();
+    void createComponentOnSingletonDestruction();
+    void uiLanguage();
 
 public slots:
     QObject *createAQObjectForOwnershipTest ()
@@ -211,6 +214,19 @@ void tst_qqmlengine::baseUrl()
     engine.setBaseUrl(cwd);
     QCOMPARE(engine.baseUrl(), cwd);
     QCOMPARE(engine.rootContext()->resolvedUrl(QUrl("main.qml")), cwd.resolved(QUrl("main.qml")));
+
+
+    const QString testPath = QDir::currentPath() + QLatin1String("/");
+    const QString rootPath = QDir::rootPath();
+    engine.setBaseUrl(QUrl());
+
+    // Check that baseUrl returns a url to a localFile
+    QCOMPARE(engine.baseUrl().toLocalFile(), testPath);
+
+    QDir::setCurrent(QDir::rootPath());
+
+    // Make sure this also works when in the rootPath
+    QCOMPARE(engine.baseUrl().toLocalFile(), rootPath);
 }
 
 void tst_qqmlengine::contextForObject()
@@ -423,12 +439,13 @@ void tst_qqmlengine::trimComponentCache()
 
     QQmlEngine engine;
     ComponentCacheFunctions componentCache(engine);
-    engine.rootContext()->setContextProperty("componentCache", &componentCache);
     engine.setIncubationController(&componentCache);
 
     QQmlComponent component(&engine, testFileUrl(file));
-    QVERIFY(component.isReady());
-    QScopedPointer<QObject> object(component.create());
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QScopedPointer<QObject> object(component.createWithInitialProperties({
+            {"componentCache", QVariant::fromValue(&componentCache)}
+    }));
     QVERIFY(object != nullptr);
     QCOMPARE(object->property("success").toBool(), true);
 }
@@ -510,6 +527,7 @@ void tst_qqmlengine::failedCompilation()
     QQmlEngine engine;
 
     QQmlComponent component(&engine, testFileUrl(file));
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, "QQmlComponent: Component is not ready");
     QVERIFY(!component.isReady());
     QScopedPointer<QObject> object(component.create());
     QVERIFY(object.isNull());
@@ -600,11 +618,10 @@ void tst_qqmlengine::objectOwnership()
         {
             QQmlEngine engine;
             QQmlComponent c(&engine);
-            engine.rootContext()->setContextProperty("test", this);
             QQmlEngine::setObjectOwnership(ptr, QQmlEngine::JavaScriptOwnership);
-            c.setData("import QtQuick 2.0; Item { property int data: test.createAQObjectForOwnershipTest() ? 0 : 1 }", QUrl());
+            c.setData("import QtQuick 2.0; Item { required property QtObject test; property int data: test.createAQObjectForOwnershipTest() ? 0 : 1 }", QUrl());
             QVERIFY(c.isReady());
-            QObject *o = c.create();
+            QObject *o = c.createWithInitialProperties( {{"test", QVariant::fromValue(this)}} );
             QVERIFY(o != nullptr);
         }
         QTRY_VERIFY(spy.count());
@@ -615,13 +632,13 @@ void tst_qqmlengine::objectOwnership()
         {
             QQmlEngine engine;
             QQmlComponent c(&engine);
-            engine.rootContext()->setContextProperty("test", ptr);
             QQmlEngine::setObjectOwnership(ptr, QQmlEngine::JavaScriptOwnership);
-            c.setData("import QtQuick 2.0; QtObject { property var object: { var i = test; test ? 0 : 1 }  }", QUrl());
+            c.setData("import QtQuick 2.0; QtObject { required property QtObject test; property var object: { var i = test; test ? 0 : 1 }  }", QUrl());
             QVERIFY(c.isReady());
-            QObject *o = c.create();
+            QObject *o = c.createWithInitialProperties({{"test", QVariant::fromValue(ptr)}});
             QVERIFY(o != nullptr);
-            engine.rootContext()->setContextProperty("test", nullptr);
+            QQmlProperty testProp(o, "test");
+            testProp.write(QVariant::fromValue<QObject*>(nullptr));
         }
         QTRY_VERIFY(spy.count());
     }
@@ -741,13 +758,17 @@ public:
     CustomSelector(const QUrl &base):m_base(base){}
     virtual QUrl intercept(const QUrl &url, QQmlAbstractUrlInterceptor::DataType d)
     {
-        if (url.scheme() != QStringLiteral("file"))
+        if ((url.scheme() != QStringLiteral("file") && url.scheme() != QStringLiteral("qrc"))
+            || url.path().contains("QtQml"))
             return url;
         if (!m_interceptionPoints.contains(d))
             return url;
 
-        if (url.path().endsWith("Test.2/qmldir"))//Special case
-            return QUrl::fromLocalFile(m_base.path() + "interception/module/intercepted/qmldir");
+        if (url.path().endsWith("Test.2/qmldir")) {//Special case
+            QUrl url = m_base;
+            url.setPath(m_base.path() + "interception/module/intercepted/qmldir");
+            return url;
+        }
         // Special case: with 5.10 we always add the implicit import, so we need to explicitly handle this case now
         if (url.path().endsWith("intercepted/qmldir"))
             return url;
@@ -767,6 +788,7 @@ public:
 };
 
 Q_DECLARE_METATYPE(QList<QQmlAbstractUrlInterceptor::DataType>);
+
 void tst_qqmlengine::urlInterceptor_data()
 {
     QTest::addColumn<QUrl>("testFile");
@@ -835,7 +857,7 @@ void tst_qqmlengine::urlInterceptor()
     QFETCH(QString, expectedAbsoluteUrl);
 
     QQmlEngine e;
-    e.setImportPathList(QStringList() << testFileUrl("interception/imports").toLocalFile());
+    e.addImportPath(testFileUrl("interception/imports").url());
     CustomSelector cs(testFileUrl(""));
     cs.m_interceptionPoints = interceptionPoint;
     e.setUrlInterceptor(&cs);
@@ -935,14 +957,15 @@ void tst_qqmlengine::cppSignalAndEval()
 {
     ObjectCaller objectCaller;
     QQmlEngine engine;
-    engine.rootContext()->setContextProperty(QLatin1Literal("CallerCpp"), &objectCaller);
+    qmlRegisterSingletonInstance("Test", 1, 0, "CallerCpp", &objectCaller);
     QQmlComponent c(&engine);
     c.setData("import QtQuick 2.9\n"
+              "import Test 1.0\n"
               "Item {\n"
               "    property var r: 0\n"
               "    Connections {\n"
               "        target: CallerCpp;\n"
-              "        onDoubleReply: {\n"
+              "        function onDoubleReply() {\n"
               "            eval('var z = 1');\n"
               "            r = a;\n"
               "        }\n"
@@ -987,6 +1010,11 @@ public:
     SomeQObjectClass() : QObject(nullptr){}
 };
 
+class Dayfly : public QObject
+{
+    Q_OBJECT
+};
+
 void tst_qqmlengine::singletonInstance()
 {
     QQmlEngine engine;
@@ -1012,6 +1040,65 @@ void tst_qqmlengine::singletonInstance()
         QObject *instance = value.toQObject();
         QVERIFY(instance);
         QCOMPARE(instance->metaObject()->className(), "JsSingleton");
+    }
+
+    {
+        int data = 30;
+        auto id = qmlRegisterSingletonType<CppSingleton>("Qt.test",1,0,"CapturingLambda",[data](QQmlEngine*, QJSEngine*){ // register qobject singleton with capturing lambda
+                auto o = new CppSingleton;
+                o->setProperty("data", data);
+                return o;
+        });
+        QJSValue value = engine.singletonInstance<QJSValue>(id);
+        QVERIFY(!value.isUndefined());
+        QVERIFY(value.isQObject());
+        QObject *instance = value.toQObject();
+        QVERIFY(instance);
+        QCOMPARE(instance->metaObject()->className(), "CppSingleton");
+        QCOMPARE(instance->property("data"), data);
+    }
+    {
+        qmlRegisterSingletonType<CppSingleton>("Qt.test",1,0,"NotAmbiguous", [](QQmlEngine* qeng, QJSEngine* jeng) -> QObject* {return CppSingleton::create(qeng, jeng);}); // test that overloads for qmlRegisterSingleton are not ambiguous
+    }
+    {
+        // Register QObject* directly
+        CppSingleton single;
+        int id = qmlRegisterSingletonInstance("Qt.test", 1, 0, "CppOwned",
+                                                                &single);
+        QQmlEngine engine2;
+        CppSingleton *singlePtr = engine2.singletonInstance<CppSingleton *>(id);
+        QVERIFY(singlePtr);
+        QCOMPARE(&single, singlePtr);
+        QVERIFY(engine2.objectOwnership(singlePtr) == QQmlEngine::CppOwnership);
+    }
+
+    {
+        CppSingleton single;
+        QQmlEngine engineA;
+        QQmlEngine engineB;
+        int id = qmlRegisterSingletonInstance("Qt.test", 1, 0, "CppOwned", &single);
+        auto singlePtr = engineA.singletonInstance<CppSingleton *>(id);
+        QVERIFY(singlePtr);
+        singlePtr = engineA.singletonInstance<CppSingleton *>(id); // accessing the singleton multiple times from the same engine is fine
+        QVERIFY(singlePtr);
+        QTest::ignoreMessage(QtMsgType::QtCriticalMsg, "<Unknown File>: qmlRegisterSingletonType(): \"CppOwned\" is not available because the callback function returns a null pointer.");
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, "<Unknown File>: Singleton registered by registerSingletonInstance must only be accessed from one engine");
+        QCOMPARE(&single, singlePtr);
+        auto noSinglePtr = engineB.singletonInstance<CppSingleton *>(id);
+        QVERIFY(!noSinglePtr);
+    }
+
+    {
+        CppSingleton single;
+        QThread newThread {};
+        single.moveToThread(&newThread);
+        QCOMPARE(single.thread(), &newThread);
+        QQmlEngine engineB;
+        int id = qmlRegisterSingletonInstance("Qt.test", 1, 0, "CppOwned", &single);
+        QTest::ignoreMessage(QtMsgType::QtCriticalMsg, "<Unknown File>: qmlRegisterSingletonType(): \"CppOwned\" is not available because the callback function returns a null pointer.");
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, "<Unknown File>: Registered object must live in the same thread as the engine it was registered with");
+        auto noSinglePtr = engineB.singletonInstance<CppSingleton *>(id);
+        QVERIFY(!noSinglePtr);
     }
 
     {
@@ -1043,6 +1130,16 @@ void tst_qqmlengine::singletonInstance()
         SomeQObjectClass * instance = engine.singletonInstance<SomeQObjectClass*>(cppSingletonTypeId);
         QVERIFY(!instance);
     }
+
+    {
+        // deleted object
+        auto dayfly = new Dayfly{};
+        auto id = qmlRegisterSingletonInstance("Vanity", 1, 0, "Dayfly", dayfly);
+        delete dayfly;
+        QTest::ignoreMessage(QtMsgType::QtWarningMsg, "<Unknown File>: The registered singleton has already been deleted. Ensure that it outlives the engine.");
+        QObject *instance = engine.singletonInstance<QObject*>(id);
+        QVERIFY(!instance);
+    }
 }
 
 void tst_qqmlengine::aggressiveGc()
@@ -1065,6 +1162,68 @@ void tst_qqmlengine::cachedGetterLookup_qtbug_75335()
     QVERIFY(component.isReady());
     QScopedPointer<QObject> object(component.create());
     QVERIFY(object != nullptr);
+}
+
+class EvilSingleton : public QObject
+{
+    Q_OBJECT
+public:
+    QPointer<QQmlEngine> m_engine;
+    EvilSingleton(QQmlEngine *engine) : m_engine(engine) {
+        connect(this, &QObject::destroyed, this, [this]() {
+            QQmlComponent component(m_engine);
+            component.setData("import QtQml 2.0\nQtObject {}", QUrl("file://Stuff.qml"));
+            QVERIFY(component.isReady());
+            QScopedPointer<QObject> obj(component.create());
+            QVERIFY(obj);
+        });
+    }
+};
+
+void tst_qqmlengine::createComponentOnSingletonDestruction()
+{
+    qmlRegisterSingletonType<EvilSingleton>("foo.foo", 1, 0, "Singleton",
+                                            [](QQmlEngine *engine, QJSEngine *) {
+        return new EvilSingleton(engine);
+    });
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("evilSingletonInstantiation.qml"));
+    QVERIFY(component.isReady());
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(obj);
+}
+
+void tst_qqmlengine::uiLanguage()
+{
+    QQmlEngine engine;
+
+    QObject::connect(&engine, &QJSEngine::uiLanguageChanged, [&engine]() {
+        engine.retranslate();
+    });
+
+    QSignalSpy uiLanguageChangeSpy(&engine, SIGNAL(uiLanguageChanged()));
+
+    QQmlComponent component(&engine, testFileUrl("uiLanguage.qml"));
+
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, (component.url().toString() + ":2:1: QML QtObject: Binding loop detected for property \"textToTranslate\"").toLatin1());
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(!object.isNull());
+
+    QVERIFY(engine.uiLanguage().isEmpty());
+    QCOMPARE(object->property("numberOfTranslationBindingEvaluations").toInt(), 1);
+
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, (component.url().toString() + ":2:1: QML QtObject: Binding loop detected for property \"textToTranslate\"").toLatin1());
+    engine.setUiLanguage("TestLanguage");
+    QCOMPARE(object->property("numberOfTranslationBindingEvaluations").toInt(), 2);
+    QCOMPARE(object->property("chosenLanguage").toString(), "TestLanguage");
+
+
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, (component.url().toString() + ":2:1: QML QtObject: Binding loop detected for property \"textToTranslate\"").toLatin1());
+    engine.evaluate("Qt.uiLanguage = \"anotherLanguage\"");
+    QCOMPARE(engine.uiLanguage(), QString("anotherLanguage"));
+    QCOMPARE(object->property("numberOfTranslationBindingEvaluations").toInt(), 3);
+    QCOMPARE(object->property("chosenLanguage").toString(), "anotherLanguage");
 }
 
 QTEST_MAIN(tst_qqmlengine)

@@ -345,7 +345,7 @@ void QQmlDebugServerImpl::parseArguments()
     QString fileName;
     QStringList services;
 
-    const auto lstjsDebugArguments = args.splitRef(QLatin1Char(','), QString::SkipEmptyParts);
+    const auto lstjsDebugArguments = args.splitRef(QLatin1Char(','), Qt::SkipEmptyParts);
     for (auto argsIt = lstjsDebugArguments.begin(), argsItEnd = lstjsDebugArguments.end(); argsIt != argsItEnd; ++argsIt) {
         const QStringRef &strArgument = *argsIt;
         if (strArgument.startsWith(QLatin1String("port:"))) {
@@ -355,14 +355,12 @@ void QQmlDebugServerImpl::parseArguments()
             if (argsNext == argsItEnd)
                 break;
             if (ok) {
-                const QString nextArgument = argsNext->toString();
-
-                // Don't use QStringLiteral here. QRegExp has a global cache and will save an implicitly
-                // shared copy of the passed string. That copy isn't properly detached when the library
-                // is unloaded if the original string lives in the library's .rodata
-                if (nextArgument.contains(QRegExp(QLatin1String("^\\s*\\d+\\s*$")))) {
-                    portTo = nextArgument.toInt(&ok);
+                portTo = argsNext->toString().toInt(&ok);
+                if (ok) {
                     ++argsIt;
+                } else {
+                    portTo = portFrom;
+                    ok = true;
                 }
             }
         } else if (strArgument.startsWith(QLatin1String("host:"))) {
@@ -424,6 +422,11 @@ void QQmlDebugServerImpl::parseArguments()
             << tr("Sends qDebug() and similar messages over the QML debug\n"
                "\t\t  connection. QtCreator uses this for showing debug\n"
                "\t\t  messages in the debugger console.") << '\n'
+            << '\n' << QQmlDebugTranslationService::s_key << "\t- "
+            //: Please preserve the line breaks and formatting
+            << tr("helps to see if a translated text\n"
+               "\t\t  will result in an elided text\n"
+               "\t\t  in QML elements.") << '\n'
            << tr("Other services offered by qmltooling plugins that implement "
                  "QQmlDebugServiceFactory and which can be found in the standard plugin "
                  "paths will also be available and can be specified. If no \"services\" "
@@ -508,7 +511,7 @@ void QQmlDebugServerImpl::receiveMessage()
             in >> m_clientPlugins;
 
             for (DebugServiceConstIt iter = m_plugins.constBegin(), cend = m_plugins.constEnd(); iter != cend; ++iter) {
-                const QString pluginName = iter.key();
+                const QString &pluginName = iter.key();
                 QQmlDebugService::State newState = QQmlDebugService::Unavailable;
                 if (m_clientPlugins.contains(pluginName))
                     newState = QQmlDebugService::Enabled;

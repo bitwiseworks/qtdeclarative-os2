@@ -5,12 +5,13 @@ qtConfig(qml-devtools) {
     SUBDIRS += \
         qmllint \
         qmlmin \
-        qmlimportscanner
+        qmlimportscanner \
+        qmlformat
 
     qtConfig(commandlineparser):qtConfig(xmlstreamwriter): SUBDIRS += qmlcachegen
 }
 
-qtConfig(thread):!android|android_app:!wasm {
+qtConfig(thread):!android|android_app:!wasm:!rtems {
     SUBDIRS += \
         qml
 

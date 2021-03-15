@@ -254,6 +254,7 @@ void QQuickGridLayoutBase::setOrientation(Qt::Orientation orientation)
 QSizeF QQuickGridLayoutBase::sizeHint(Qt::SizeHint whichSizeHint) const
 {
     Q_D(const QQuickGridLayoutBase);
+    ensureLayoutItemsUpdated();
     return d->engine.sizeHint(whichSizeHint, QSizeF(), d->styleInfo);
 }
 
@@ -283,8 +284,11 @@ Qt::LayoutDirection QQuickGridLayoutBase::layoutDirection() const
 void QQuickGridLayoutBase::setLayoutDirection(Qt::LayoutDirection dir)
 {
     Q_D(QQuickGridLayoutBase);
+    if (d->m_layoutDirection == dir)
+        return;
     d->m_layoutDirection = dir;
     invalidate();
+    emit layoutDirectionChanged();
 }
 
 Qt::LayoutDirection QQuickGridLayoutBase::effectiveLayoutDirection() const
@@ -312,14 +316,27 @@ QQuickGridLayoutBase::~QQuickGridLayoutBase()
 
 void QQuickGridLayoutBase::componentComplete()
 {
-    quickLayoutDebug() << objectName() << "QQuickGridLayoutBase::componentComplete()" << parent();
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::componentComplete()" << this << parent();
     QQuickLayout::componentComplete();
-    updateLayoutItems();
+
+    /* The layout is invalid when it is constructed, but during construction of the layout and
+       its children (in the "static/from QML" case which this is trying to cover) things
+       change and as a consequence invalidate() and ensureLayoutItemsUpdated() might be called.
+       As soon as ensureLayoutItemsUpdated() is called it will set d->dirty = false.
+       However, a subsequent invalidate() will return early if the component is not completed
+       because it knows that componentComplete() will take care of doing the proper layouting
+       (so it won't set d->dirty = true). When we then call ensureLayoutItemsUpdated() again here
+       it sees that its not dirty and assumes everything up-to-date. For those cases we therefore
+       need to call invalidate() in advance
+    */
+    invalidate();
+    ensureLayoutItemsUpdated();
 
     QQuickItem *par = parentItem();
     if (qobject_cast<QQuickLayout*>(par))
         return;
     rearrange(QSizeF(width(), height()));
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::componentComplete(). COMPLETED" << this << parent();
 }
 
 /*
@@ -339,13 +356,12 @@ void QQuickGridLayoutBase::componentComplete()
         }
     }
 
-  1.    l2->invalidateChildItem(a) is called on l2, where item refers to "a".
+  1.    l2->invalidate(a) is called on l2, where item refers to "a".
         (this will dirty the cached size hints of item "a")
-  2.    l2->invalidate() is called
-        this will :
+  2.    The layout engine will invalidate:
             i)  invalidate the layout engine
-            ii) dirty the cached size hints of item "l2" (by calling parentLayout()->invalidateChildItem
-
+            ii) dirty the cached size hints of item "l2" (by calling parentLayout()->invalidate(l2)
+        The recursion continues to the topmost layout
  */
 /*!
    \internal
@@ -360,43 +376,29 @@ void QQuickGridLayoutBase::invalidate(QQuickItem *childItem)
     Q_D(QQuickGridLayoutBase);
     if (!isReady())
         return;
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::invalidate()" << this << ", invalidated:" << invalidated();
+    if (invalidated()) {
+        return;
+    }
+    qCDebug(lcQuickLayouts) << "d->m_rearranging:" << d->m_rearranging;
     if (d->m_rearranging) {
         d->m_invalidateAfterRearrange << childItem;
         return;
     }
 
-    quickLayoutDebug() << "QQuickGridLayoutBase::invalidate()";
-
     if (childItem) {
         if (QQuickGridLayoutItem *layoutItem = d->engine.findLayoutItem(childItem))
             layoutItem->invalidate();
-        if (d->m_ignoredItems.contains(childItem)) {
-            updateLayoutItems();
-            return;
-        }
     }
     // invalidate engine
     d->engine.invalidate();
 
-    QQuickLayout::invalidate(this);
+    qCDebug(lcQuickLayouts) << "calling QQuickLayout::invalidate();";
+    QQuickLayout::invalidate();
 
-    QQuickLayoutAttached *info = attachedLayoutObject(this);
-
-    const QSizeF min = sizeHint(Qt::MinimumSize);
-    const QSizeF pref = sizeHint(Qt::PreferredSize);
-    const QSizeF max = sizeHint(Qt::MaximumSize);
-
-    const bool old = info->setChangesNotificationEnabled(false);
-    info->setMinimumImplicitSize(min);
-    info->setMaximumImplicitSize(max);
-    info->setChangesNotificationEnabled(old);
-    if (pref.width() == implicitWidth() && pref.height() == implicitHeight()) {
-        // In case setImplicitSize does not emit implicit{Width|Height}Changed
-        if (QQuickLayout *parentLayout = qobject_cast<QQuickLayout *>(parentItem()))
-            parentLayout->invalidate(this);
-    } else {
-        setImplicitSize(pref.width(), pref.height());
-    }
+    if (QQuickLayout *parentLayout = qobject_cast<QQuickLayout *>(parentItem()))
+        parentLayout->invalidate(this);
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::invalidate() LEAVING" << this;
 }
 
 void QQuickGridLayoutBase::updateLayoutItems()
@@ -409,23 +411,25 @@ void QQuickGridLayoutBase::updateLayoutItems()
         return;
     }
 
-    quickLayoutDebug() << "QQuickGridLayoutBase::updateLayoutItems";
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::updateLayoutItems ENTERING" << this;
     d->engine.deleteItems();
     insertLayoutItems();
-
-    invalidate();
-    quickLayoutDebug() << "QQuickGridLayoutBase::updateLayoutItems LEAVING";
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::updateLayoutItems() LEAVING" << this;
 }
 
 QQuickItem *QQuickGridLayoutBase::itemAt(int index) const
 {
     Q_D(const QQuickGridLayoutBase);
+    qCDebug(lcQuickLayouts).nospace() << "QQuickGridLayoutBase::itemAt(" << index << ")";
+    ensureLayoutItemsUpdated();
+    qCDebug(lcQuickLayouts).nospace() << "QQuickGridLayoutBase::itemAt(" << index << ") LEAVING";
     return static_cast<QQuickGridLayoutItem*>(d->engine.itemAt(index))->layoutItem();
 }
 
 int QQuickGridLayoutBase::itemCount() const
 {
     Q_D(const QQuickGridLayoutBase);
+    ensureLayoutItemsUpdated();
     return d->engine.itemCount();
 }
 
@@ -442,7 +446,7 @@ void QQuickGridLayoutBase::itemDestroyed(QQuickItem *item)
     if (!isReady())
         return;
     Q_D(QQuickGridLayoutBase);
-    quickLayoutDebug() << "QQuickGridLayoutBase::itemDestroyed";
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::itemDestroyed";
     if (QQuickGridLayoutItem *gridItem = d->engine.findLayoutItem(item)) {
         removeGridItem(gridItem);
         delete gridItem;
@@ -456,8 +460,8 @@ void QQuickGridLayoutBase::itemVisibilityChanged(QQuickItem *item)
 
     if (!isReady())
         return;
-    quickLayoutDebug() << "QQuickGridLayoutBase::itemVisibilityChanged";
-    updateLayoutItems();
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::itemVisibilityChanged()";
+    invalidate(item);
 }
 
 void QQuickGridLayoutBase::rearrange(const QSizeF &size)
@@ -466,8 +470,21 @@ void QQuickGridLayoutBase::rearrange(const QSizeF &size)
     if (!isReady())
         return;
 
+    ensureLayoutItemsUpdated();
+
+    qCDebug(lcQuickLayouts) << "QQuickGridLayoutBase::rearrange" << d->m_recurRearrangeCounter << this;
+    const auto refCounter = qScopeGuard([&d] {
+        --(d->m_recurRearrangeCounter);
+    });
+    if (d->m_recurRearrangeCounter++ == 2) {
+        // allow a recursive depth of two in order to respond to height-for-width
+        // (e.g QQuickText changes implicitHeight when its width gets changed)
+        qWarning() << "Qt Quick Layouts: Detected recursive rearrange. Aborting after two iterations.";
+        return;
+    }
+
     d->m_rearranging = true;
-    quickLayoutDebug() << objectName() << "QQuickGridLayoutBase::rearrange()" << size;
+    qCDebug(lcQuickLayouts) << objectName() << "QQuickGridLayoutBase::rearrange()" << size;
     Qt::LayoutDirection visualDir = effectiveLayoutDirection();
     d->engine.setVisualDirection(visualDir);
 
@@ -489,7 +506,7 @@ void QQuickGridLayoutBase::rearrange(const QSizeF &size)
     d->m_invalidateAfterRearrange.clear();
 
     if (d->m_updateAfterRearrange) {
-        updateLayoutItems();
+        ensureLayoutItemsUpdated();
         d->m_updateAfterRearrange = false;
     }
 }
@@ -524,6 +541,7 @@ void QQuickGridLayout::setColumnSpacing(qreal spacing)
 
     d->engine.setSpacing(spacing, Qt::Horizontal);
     invalidate();
+    emit columnSpacingChanged();
 }
 
 /*!
@@ -546,6 +564,7 @@ void QQuickGridLayout::setRowSpacing(qreal spacing)
 
     d->engine.setSpacing(spacing, Qt::Vertical);
     invalidate();
+    emit rowSpacingChanged();
 }
 
 /*!
@@ -567,7 +586,7 @@ void QQuickGridLayout::setColumns(int columns)
     if (d->columns == columns)
         return;
     d->columns = columns;
-    updateLayoutItems();
+    invalidate();
     emit columnsChanged();
 }
 
@@ -590,7 +609,7 @@ void QQuickGridLayout::setRows(int rows)
     if (d->rows == rows)
         return;
     d->rows = rows;
-    updateLayoutItems();
+    invalidate();
     emit rowsChanged();
 }
 
@@ -628,7 +647,7 @@ void QQuickGridLayout::setFlow(QQuickGridLayout::Flow flow)
         return;
     d->flow = flow;
     // If flow is changed, the layout needs to be repopulated
-    updateLayoutItems();
+    invalidate();
     emit flowChanged();
 }
 
@@ -640,6 +659,7 @@ void QQuickGridLayout::insertLayoutItems()
     int &nextColumn = nextCellPos[0];
     int &nextRow = nextCellPos[1];
 
+    const QSize gridSize(columns(), rows());
     const int flowOrientation = flow();
     int &flowColumn = nextCellPos[flowOrientation];
     int &flowRow = nextCellPos[1 - flowOrientation];
@@ -648,7 +668,6 @@ void QQuickGridLayout::insertLayoutItems()
     if (flowBound < 0)
         flowBound = std::numeric_limits<int>::max();
 
-    d->m_ignoredItems.clear();
     QSizeF sizeHints[Qt::NSizeHints];
     const auto items = childItems();
     for (QQuickItem *child : items) {
@@ -659,7 +678,7 @@ void QQuickGridLayout::insertLayoutItems()
         if (shouldIgnoreItem(child, info, sizeHints))
             continue;
 
-        Qt::Alignment alignment = nullptr;
+        Qt::Alignment alignment;
         int row = -1;
         int column = -1;
         int span[2] = {1,1};
@@ -672,8 +691,21 @@ void QQuickGridLayout::insertLayoutItems()
                 // the unspecified component of the cell position should default to 0
                 // The getters do this for us, as they will return 0 for an
                 // unset (or negative) value.
-                row = info->row();
-                column = info->column();
+                // In addition, if \a rows is less than Layout.row, treat Layout.row as if it was not set
+                // This will basically make it find the next available cell (potentially wrapping to
+                // the next line). Likewise for an invalid Layout.column
+
+                if (gridSize.height() >= 0 && row >= gridSize.height()) {
+                    qmlWarning(child) << QString::fromLatin1("Layout: row (%1) should be less than the number of rows (%2)").arg(info->row()).arg(rows());
+                } else {
+                    row = info->row();
+                }
+
+                if (gridSize.width() >= 0 && info->column() >= gridSize.width()) {
+                    qmlWarning(child) << QString::fromLatin1("Layout: column (%1) should be less than the number of columns (%2)").arg(info->column()).arg(columns());
+                } else {
+                    column = info->column();
+                }
             }
             rowSpan = info->rowSpan();
             columnSpan = info->columnSpan();
@@ -817,12 +849,12 @@ void QQuickLinearLayout::setSpacing(qreal space)
 
     d->engine.setSpacing(space, Qt::Horizontal | Qt::Vertical);
     invalidate();
+    emit spacingChanged();
 }
 
 void QQuickLinearLayout::insertLayoutItems()
 {
     Q_D(QQuickLinearLayout);
-    d->m_ignoredItems.clear();
     QSizeF sizeHints[Qt::NSizeHints];
     const auto items = childItems();
     for (QQuickItem *child : items) {
@@ -834,7 +866,7 @@ void QQuickLinearLayout::insertLayoutItems()
         if (shouldIgnoreItem(child, info, sizeHints))
             continue;
 
-        Qt::Alignment alignment = nullptr;
+        Qt::Alignment alignment;
         if (info)
             alignment = info->alignment();
 

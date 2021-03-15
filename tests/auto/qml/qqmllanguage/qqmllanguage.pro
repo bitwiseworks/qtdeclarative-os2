@@ -1,4 +1,7 @@
-CONFIG += testcase
+CONFIG += testcase qmltypes
+QML_IMPORT_NAME = StaticTest
+QML_IMPORT_VERSION = 1.0
+
 TARGET = tst_qqmllanguage
 macx:CONFIG -= app_bundle
 
@@ -17,3 +20,5 @@ include (../../shared/util.pri)
 
 OTHER_FILES += \
     data/readonlyObjectProperty.qml
+
+android: RESOURCES += qqmllanguage.qrc

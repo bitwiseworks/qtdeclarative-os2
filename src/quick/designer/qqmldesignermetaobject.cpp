@@ -45,7 +45,6 @@
 #include <QDebug>
 
 #include <private/qqmlengine_p.h>
-#include <private/qqmlpropertycache_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -137,7 +136,7 @@ QQmlDesignerMetaObject::QQmlDesignerMetaObject(QObject *object, QQmlEngine *engi
     //Assign cache to object
     if (ddata && ddata->propertyCache) {
         cache->setParent(ddata->propertyCache);
-        cache->invalidate(engine, this);
+        cache->invalidate(this);
         ddata->propertyCache->release();
         ddata->propertyCache = cache.data();
         ddata->propertyCache->addref();
@@ -162,7 +161,7 @@ void QQmlDesignerMetaObject::createNewDynamicProperty(const QString &name)
 
     //Updating cache
     QQmlPropertyCache *oldParent = cache->parent();
-    QQmlEnginePrivate::get(m_context->engine())->cache(this)->invalidate(m_context->engine(), this);
+    QQmlEnginePrivate::get(m_context->engine())->cache(this)->invalidate(this);
     cache->setParent(oldParent);
 
     QQmlProperty property(myObject(), name, m_context);
@@ -241,7 +240,7 @@ int QQmlDesignerMetaObject::metaCall(QObject *o, QMetaObject::Call call, int id,
 
     if (call == QMetaObject::WriteProperty
             && propertyById.userType() == QMetaType::QVariant
-            && reinterpret_cast<QVariant *>(a[0])->type() == QVariant::Double
+            && reinterpret_cast<QVariant *>(a[0])->userType() == QMetaType::Double
             && qt_is_nan(reinterpret_cast<QVariant *>(a[0])->toDouble())) {
         return -1;
     }

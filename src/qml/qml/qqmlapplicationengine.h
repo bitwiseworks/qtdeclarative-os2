@@ -66,6 +66,7 @@ public:
 public Q_SLOTS:
     void load(const QUrl &url);
     void load(const QString &filePath);
+    void setInitialProperties(const QVariantMap &initialProperties);
     void loadData(const QByteArray &data, const QUrl &url = QUrl());
 
 Q_SIGNALS:
@@ -73,6 +74,7 @@ Q_SIGNALS:
 
 private:
     Q_DISABLE_COPY(QQmlApplicationEngine)
+    Q_PRIVATE_SLOT(d_func(), void _q_loadTranslations())
     Q_DECLARE_PRIVATE(QQmlApplicationEngine)
 };
 

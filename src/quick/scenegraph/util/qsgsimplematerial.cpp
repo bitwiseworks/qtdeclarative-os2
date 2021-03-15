@@ -46,8 +46,11 @@
     \inmodule QtQuick
     \ingroup qtquick-scenegraph-materials
 
-    \warning This utility class is only functional when running with the OpenGL
-    backend of the Qt Quick scenegraph.
+    \deprecated
+
+    \warning This utility class is only functional when running with the legacy
+    OpenGL renderer of the Qt Quick scenegraph. Its usage is not recommended in
+    new application code.
 
     Where the QSGMaterial and QSGMaterialShader API requires a bit of
     boilerplate code to create a functioning material, the
@@ -232,6 +235,8 @@
 
 /*!
     \class QSGSimpleMaterial
+
+    \deprecated
 
     \inmodule QtQuick
     \ingroup qtquick-scenegraph-materials

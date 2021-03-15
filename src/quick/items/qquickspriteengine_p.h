@@ -58,7 +58,7 @@ QT_REQUIRE_CONFIG(quick_sprite);
 #include <QObject>
 #include <QVector>
 #include <QTimer>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QList>
 #include <QQmlListProperty>
 #include <QImage>
@@ -196,7 +196,7 @@ public:
 
     QQmlListProperty<QQuickStochasticState> states()
     {
-        return QQmlListProperty<QQuickStochasticState>(this, m_states);
+        return QQmlListProperty<QQuickStochasticState>(this, &m_states);
     }
 
     QString globalGoal() const
@@ -254,7 +254,7 @@ protected:
     QVector<int> m_startTimes;
     QVector<QPair<uint, QVector<int> > > m_stateUpdates;//### This could be done faster - priority queue?
 
-    QTime m_advanceTime;
+    QElapsedTimer m_advanceTimer;
     uint m_timeOffset;
     QString m_globalGoal;
     int m_maxFrames;
@@ -272,7 +272,7 @@ public:
     ~QQuickSpriteEngine() override;
     QQmlListProperty<QQuickSprite> sprites()
     {
-        return QQmlListProperty<QQuickSprite>(this, m_sprites);
+        return QQmlListProperty<QQuickSprite>(this, &m_sprites);
     }
 
     QQuickSprite* sprite(int sprite = 0) const;
@@ -328,6 +328,18 @@ inline void spriteClear(QQmlListProperty<QQuickSprite> *p)
 inline int spriteCount(QQmlListProperty<QQuickSprite> *p)
 {
     return reinterpret_cast<QList<QQuickSprite *> *>(p->data)->count();
+}
+
+inline void spriteReplace(QQmlListProperty<QQuickSprite> *p, int idx, QQuickSprite *s)
+{
+    reinterpret_cast<QList<QQuickSprite *> *>(p->data)->replace(idx, s);
+    p->object->metaObject()->invokeMethod(p->object, "createEngine");
+}
+
+inline void spriteRemoveLast(QQmlListProperty<QQuickSprite> *p)
+{
+    reinterpret_cast<QList<QQuickSprite *> *>(p->data)->removeLast();
+    p->object->metaObject()->invokeMethod(p->object, "createEngine");
 }
 
 QT_END_NAMESPACE

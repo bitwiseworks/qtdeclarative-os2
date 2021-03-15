@@ -28,6 +28,7 @@
 
 #include <QtTest/QtTest>
 #include <QtQml/qqmlengine.h>
+#include <QtQml/qqmlfile.h>
 #include <QtQml/qqmlnetworkaccessmanagerfactory.h>
 #include <QtQuick/qquickview.h>
 #include <QtQuick/qquickitem.h>
@@ -35,6 +36,7 @@
 #include <QtCore/qprocess.h>
 #endif
 #include <QtQml/private/qqmlengine_p.h>
+#include <QtQml/private/qqmltypedata_p.h>
 #include <QtQml/private/qqmltypeloader_p.h>
 #include "../../shared/testhttpserver.h"
 #include "../../shared/util.h"
@@ -56,7 +58,12 @@ private slots:
     void qmlSingletonWithinModule();
     void multiSingletonModule();
     void implicitComponentModule();
+    void customDiskCachePath();
     void qrcRootPathUrl();
+    void implicitImport();
+    void compositeSingletonCycle();
+    void declarativeCppType();
+    void circularDependency();
 };
 
 void tst_QQMLTypeLoader::testLoadComplete()
@@ -90,6 +97,8 @@ void tst_QQMLTypeLoader::trimCache()
 {
     QQmlEngine engine;
     QQmlTypeLoader &loader = QQmlEnginePrivate::get(&engine)->typeLoader;
+    QVector<QQmlTypeData *> releaseLater;
+    QVector<QV4::ExecutableCompilationUnit *> releaseCompilationUnitLater;
     for (int i = 0; i < 256; ++i) {
         QUrl url = testFileUrl("trim_cache.qml");
         url.setQuery(QString::number(i));
@@ -102,8 +111,10 @@ void tst_QQMLTypeLoader::trimCache()
         // QQmlTypeData or its compiledData() should prevent the trimming.
         if (i % 10 == 0) {
             // keep ref on data, don't add ref on data->compiledData()
+            releaseLater.append(data);
         } else if (i % 5 == 0) {
             data->compilationUnit()->addref();
+            releaseCompilationUnitLater.append(data->compilationUnit());
             data->release();
         } else {
             data->release();
@@ -119,6 +130,12 @@ void tst_QQMLTypeLoader::trimCache()
             QVERIFY(!loader.isTypeLoaded(url));
         // The cache is free to keep the others.
     }
+
+    for (auto *data : qAsConst(releaseCompilationUnitLater))
+        data->release();
+
+    for (auto *data : qAsConst(releaseLater))
+        data->release();
 }
 
 void tst_QQMLTypeLoader::trimCache2()
@@ -431,7 +448,7 @@ void tst_QQMLTypeLoader::redirect()
     component.loadUrl(server.urlString("/Load.qml"), QQmlComponent::Asynchronous);
     QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
 
-    QObject *object = component.create();
+    QScopedPointer<QObject> object {component.create()};
     QTRY_COMPARE(object->property("xy").toInt(), 323232);
 }
 
@@ -504,11 +521,84 @@ void tst_QQMLTypeLoader::implicitComponentModule()
     checkCleanCacheLoad(QLatin1String("implicitComponentModule"));
 }
 
+void tst_QQMLTypeLoader::customDiskCachePath()
+{
+#if QT_CONFIG(process)
+    const char *skipKey = "QT_TST_QQMLTYPELOADER_SKIP_MISMATCH";
+    if (qEnvironmentVariableIsSet(skipKey)) {
+        QQmlEngine engine;
+        QQmlComponent component(&engine, testFileUrl("Base.qml"));
+        QCOMPARE(component.status(), QQmlComponent::Ready);
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+        return;
+    }
+
+    QTemporaryDir dir;
+    QProcess child;
+    child.setProgram(QCoreApplication::applicationFilePath());
+    child.setArguments(QStringList(QLatin1String("customDiskCachePath")));
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QLatin1String(skipKey), QLatin1String("1"));
+    env.insert(QLatin1String("QML_DISK_CACHE_PATH"), dir.path());
+    child.setProcessEnvironment(env);
+    child.start();
+    QVERIFY(child.waitForFinished());
+    QCOMPARE(child.exitCode(), 0);
+    QDir cacheDir(dir.path());
+    QVERIFY(!cacheDir.isEmpty());
+#endif
+}
+
 void tst_QQMLTypeLoader::qrcRootPathUrl()
 {
     QQmlEngine engine;
     QQmlComponent component(&engine, testFileUrl("qrcRootPath.qml"));
     QCOMPARE(component.status(), QQmlComponent::Ready);
+}
+
+void tst_QQMLTypeLoader::implicitImport()
+{
+    QQmlEngine engine;
+    engine.addImportPath(testFile("imports"));
+    QQmlComponent component(&engine, testFileUrl("implicitimporttest.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull());
+}
+
+void tst_QQMLTypeLoader::compositeSingletonCycle()
+{
+    TestHTTPServer server;
+    QVERIFY2(server.listen(), qPrintable(server.errorString()));
+    QVERIFY(server.serveDirectory(dataDirectory()));
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    engine.addImportPath(server.baseUrl().toString());
+    component.loadUrl(server.urlString("Com/Orga/Handlers/Handler.qml"), QQmlComponent::Asynchronous);
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+    QScopedPointer<QObject> object {component.create()};
+    QVERIFY(object);
+    QCOMPARE(qvariant_cast<QColor>(object->property("color")), QColorConstants::Black);
+}
+
+void tst_QQMLTypeLoader::declarativeCppType()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("declarativeCppType.qml"));
+    QCOMPARE(component.status(), QQmlComponent::Ready);
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull());
+}
+
+void tst_QQMLTypeLoader::circularDependency()
+{
+    QQmlEngine engine;
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Cyclic dependency detected between (.*) and (.*)"));
+    QQmlComponent component(&engine, testFileUrl("CircularDependency.qml"));
+    QCOMPARE(component.status(), QQmlComponent::Null);
 }
 
 QTEST_MAIN(tst_QQMLTypeLoader)

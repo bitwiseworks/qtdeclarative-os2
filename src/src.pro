@@ -3,13 +3,24 @@ CONFIG += ordered
 include($$OUT_PWD/qml/qtqml-config.pri)
 include($$OUT_PWD/quick/qtquick-config.pri)
 QT_FOR_CONFIG += qml qml-private quick-private
+
+# Otherwise we cannot compile qmltyperegistrar
+requires(qtConfig(commandlineparser))
+
+# We need qmltyperegistrar for all type registrations, even in qml
 SUBDIRS += \
-    qml
+    qmltyperegistrar \
+    qml \
+    qmlmodels
+
+qtConfig(qml-worker-script): \
+    SUBDIRS += qmlworkerscript
 
 qtHaveModule(gui):qtConfig(qml-animation) {
-    SUBDIRS += \
-        quick \
-        quickshapes
+    SUBDIRS += quick
+
+    qtConfig(quick-path): \
+        SUBDIRS += quickshapes
 
     qtConfig(testlib): \
         SUBDIRS += qmltest

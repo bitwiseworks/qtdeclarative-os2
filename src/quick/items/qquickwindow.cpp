@@ -39,19 +39,21 @@
 
 #include "qquickwindow.h"
 #include "qquickwindow_p.h"
-#include "qquickwindowattached_p.h"
 
 #include "qquickitem.h"
 #include "qquickitem_p.h"
 #include "qquickevents_p_p.h"
 
+#if QT_CONFIG(quick_draganddrop)
 #include <private/qquickdrag_p.h>
+#endif
 #include <private/qquickhoverhandler_p.h>
 #include <private/qquickpointerhandler_p.h>
 
 #include <QtQuick/private/qsgrenderer_p.h>
-#include <QtQuick/private/qsgtexture_p.h>
+#include <QtQuick/private/qsgplaintexture_p.h>
 #include <private/qsgrenderloop_p.h>
+#include <private/qsgrhisupport_p.h>
 #include <private/qquickrendercontrol_p.h>
 #include <private/qquickanimatorcontroller_p.h>
 #include <private/qquickprofiler_p.h>
@@ -70,10 +72,11 @@
 #include <QtCore/QLibraryInfo>
 #include <QtCore/QRunnable>
 #include <QtQml/qqmlincubator.h>
+#include <QtQml/qqmlinfo.h>
+#include <QtQml/private/qqmlmetatype_p.h>
 
 #include <QtQuick/private/qquickpixmapcache_p.h>
 
-#include <private/qqmlmemoryprofiler_p.h>
 #include <private/qqmldebugserviceinterfaces_p.h>
 #include <private/qqmldebugconnector_p.h>
 #if QT_CONFIG(opengl)
@@ -84,12 +87,15 @@
 #include <private/qdebug_p.h>
 #endif
 
+#include <QtGui/private/qrhi_p.h>
+
 QT_BEGIN_NAMESPACE
 
 Q_LOGGING_CATEGORY(DBG_TOUCH, "qt.quick.touch")
 Q_LOGGING_CATEGORY(DBG_TOUCH_TARGET, "qt.quick.touch.target")
 Q_LOGGING_CATEGORY(DBG_MOUSE, "qt.quick.mouse")
 Q_LOGGING_CATEGORY(DBG_MOUSE_TARGET, "qt.quick.mouse.target")
+Q_LOGGING_CATEGORY(lcTablet, "qt.quick.tablet")
 Q_LOGGING_CATEGORY(lcWheelTarget, "qt.quick.wheel.target")
 Q_LOGGING_CATEGORY(lcGestureTarget, "qt.quick.gesture.target")
 Q_LOGGING_CATEGORY(DBG_HOVER_TRACE, "qt.quick.hover.trace")
@@ -98,6 +104,7 @@ Q_LOGGING_CATEGORY(DBG_DIRTY, "qt.quick.dirty")
 Q_LOGGING_CATEGORY(lcTransient, "qt.quick.window.transient")
 
 extern Q_GUI_EXPORT QImage qt_gl_read_framebuffer(const QSize &size, bool alpha_format, bool include_alpha);
+extern Q_GUI_EXPORT bool qt_sendShortcutOverrideEvent(QObject *o, ulong timestamp, int k, Qt::KeyboardModifiers mods, const QString &text = QString(), bool autorep = false, ushort count = 1);
 
 bool QQuickWindowPrivate::defaultAlphaBuffer = false;
 
@@ -293,6 +300,79 @@ static bool transformDirtyOnItemOrAncestor(const QQuickItem *item)
 }
 #endif
 
+/*!
+ *  \internal
+
+    A "polish loop" can occur inside QQuickWindowPrivate::polishItems(). It is when an item calls
+    polish() on an(other?) item from updatePolish(). If this anomaly happens repeatedly and without
+    interruption (of a well-behaved updatePolish() that doesn't call polish()), it is a strong
+    indication that we are heading towards an infinite polish loop. A polish loop is not a bug in
+    Qt Quick - it is a bug caused by ill-behaved items put in the scene.
+
+    We can detect this sequence of polish loops easily, since the
+    QQuickWindowPrivate::itemsToPolish is basically a stack: polish() will push to it, and
+    polishItems() will pop from it.
+    Therefore if updatePolish() calls polish(), the immediate next item polishItems() processes is
+    the item that was polished by the previous call to updatePolish().
+    We therefore just need to count the number of polish loops we detected in _sequence_.
+*/
+struct PolishLoopDetector
+{
+    PolishLoopDetector(const QVector<QQuickItem*> &itemsToPolish)
+        : itemsToPolish(itemsToPolish)
+    {
+    }
+
+    /*
+     * returns true when it detected a likely infinite loop
+     * (suggests it should abort the polish loop)
+     **/
+    bool check(QQuickItem *item, int itemsRemainingBeforeUpdatePolish)
+    {
+        if (itemsToPolish.count() > itemsRemainingBeforeUpdatePolish) {
+            // Detected potential polish loop.
+            ++numPolishLoopsInSequence;
+            if (numPolishLoopsInSequence >= 1000) {
+                // Start to warn about polish loop after 1000 consecutive polish loops
+                if (numPolishLoopsInSequence == 100000) {
+                    // We have looped 100,000 times without actually reducing the list of items to
+                    // polish, give up for now.
+                    // This is not a fix, just a remedy so that the application can be somewhat
+                    // responsive.
+                    numPolishLoopsInSequence = 0;
+                    return true;
+                } else if (numPolishLoopsInSequence < 1005) {
+                    // Show the 5 next items involved in the polish loop.
+                    // (most likely they will be the same 5 items...)
+                    QQuickItem *guiltyItem = itemsToPolish.last();
+                    qmlWarning(item) << "possible QQuickItem::polish() loop";
+
+                    auto typeAndObjectName = [](QQuickItem *item) {
+                        QString typeName = QQmlMetaType::prettyTypeName(item);
+                        QString objName = item->objectName();
+                        if (!objName.isNull())
+                            return QLatin1String("%1(%2)").arg(typeName, objName);
+                        return typeName;
+                    };
+
+                    qmlWarning(guiltyItem) << typeAndObjectName(guiltyItem)
+                               << " called polish() inside updatePolish() of " << typeAndObjectName(item);
+
+                    if (numPolishLoopsInSequence == 1004)
+                        // Enough warnings. Reset counter in order to speed things up and re-detect
+                        // more loops
+                        numPolishLoopsInSequence = 0;
+                }
+            }
+        } else {
+            numPolishLoopsInSequence = 0;
+        }
+        return false;
+    }
+    const QVector<QQuickItem*> &itemsToPolish;      // Just a ref to the one in polishItems()
+    int numPolishLoopsInSequence = 0;
+};
+
 void QQuickWindowPrivate::polishItems()
 {
     // An item can trigger polish on another item, or itself for that matter,
@@ -300,19 +380,20 @@ void QQuickWindowPrivate::polishItems()
     // iterate through the set, we must continue pulling items out until it
     // is empty.
     // In the case where polish is called from updatePolish() either directly
-    // or indirectly, we use a recursionSafeguard to print a warning to
-    // the user.
-    int recursionSafeguard = INT_MAX;
-    while (!itemsToPolish.isEmpty() && --recursionSafeguard > 0) {
+    // or indirectly, we use a PolishLoopDetector to determine if a warning should
+    // be printed to the user.
+
+    PolishLoopDetector polishLoopDetector(itemsToPolish);
+    while (!itemsToPolish.isEmpty()) {
         QQuickItem *item = itemsToPolish.takeLast();
         QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
         itemPrivate->polishScheduled = false;
+        const int itemsRemaining = itemsToPolish.count();
         itemPrivate->updatePolish();
         item->updatePolish();
+        if (polishLoopDetector.check(item, itemsRemaining) == true)
+            break;
     }
-
-    if (recursionSafeguard == 0)
-        qWarning("QQuickWindow: possible QQuickItem::polish() loop");
 
 #if QT_CONFIG(im)
     if (QQuickItem *focusItem = q_func()->activeFocusItem()) {
@@ -418,8 +499,14 @@ void forceUpdate(QQuickItem *item)
 
 void QQuickWindowPrivate::syncSceneGraph()
 {
-    QML_MEMORY_SCOPE_STRING("SceneGraph");
     Q_Q(QQuickWindow);
+
+    // Calculate the dpr the same way renderSceneGraph() will.
+    qreal devicePixelRatio = q->effectiveDevicePixelRatio();
+    if (renderTargetId && !QQuickRenderControl::renderWindowFor(q))
+        devicePixelRatio = 1;
+
+    context->prepareSync(devicePixelRatio, rhi ? swapchain->currentFrameCommandBuffer() : nullptr);
 
     animationController->beforeNodeSync();
 
@@ -451,12 +538,39 @@ void QQuickWindowPrivate::syncSceneGraph()
     runAndClearJobs(&afterSynchronizingJobs);
 }
 
-void QQuickWindowPrivate::renderSceneGraph(const QSize &size)
+void QQuickWindowPrivate::emitBeforeRenderPassRecording(void *ud)
 {
-    QML_MEMORY_SCOPE_STRING("SceneGraph");
+    QQuickWindow *w = reinterpret_cast<QQuickWindow *>(ud);
+    emit w->beforeRenderPassRecording();
+}
+
+void QQuickWindowPrivate::emitAfterRenderPassRecording(void *ud)
+{
+    QQuickWindow *w = reinterpret_cast<QQuickWindow *>(ud);
+    emit w->afterRenderPassRecording();
+}
+
+void QQuickWindowPrivate::renderSceneGraph(const QSize &size, const QSize &surfaceSize)
+{
     Q_Q(QQuickWindow);
     if (!renderer)
         return;
+
+    if (rhi) {
+        // ### no offscreen ("renderTargetId") support yet
+        context->beginNextRhiFrame(renderer,
+                                   swapchain->currentFrameRenderTarget(),
+                                   rpDescForSwapchain,
+                                   swapchain->currentFrameCommandBuffer(),
+                                   emitBeforeRenderPassRecording,
+                                   emitAfterRenderPassRecording,
+                                   q);
+    } else {
+        context->beginNextFrame(renderer,
+                                emitBeforeRenderPassRecording,
+                                emitAfterRenderPassRecording,
+                                q);
+    }
 
     animationController->advance();
     emit q->beforeRendering();
@@ -477,17 +591,45 @@ void QQuickWindowPrivate::renderSceneGraph(const QSize &size)
                 renderer->setDevicePixelRatio(1);
             }
         } else {
-            QRect rect(QPoint(0, 0), devicePixelRatio * size);
+            QSize pixelSize;
+            QSizeF logicalSize;
+            if (surfaceSize.isEmpty()) {
+                pixelSize = size * devicePixelRatio;
+                logicalSize = size;
+            } else {
+                pixelSize = surfaceSize;
+                logicalSize = QSizeF(surfaceSize) / devicePixelRatio;
+            }
+            QRect rect(QPoint(0, 0), pixelSize);
             renderer->setDeviceRect(rect);
             renderer->setViewportRect(rect);
-            renderer->setProjectionMatrixToRect(QRect(QPoint(0, 0), size));
+            const bool flipY = rhi ? !rhi->isYUpInNDC() : false;
+            QSGAbstractRenderer::MatrixTransformFlags matrixFlags;
+            if (flipY)
+                matrixFlags |= QSGAbstractRenderer::MatrixTransformFlipY;
+            renderer->setProjectionMatrixToRect(QRectF(QPoint(0, 0), logicalSize), matrixFlags);
             renderer->setDevicePixelRatio(devicePixelRatio);
         }
 
-        context->renderNextFrame(renderer, fboId);
+        if (rhi)
+            context->renderNextRhiFrame(renderer);
+        else
+            context->renderNextFrame(renderer, fboId);
     }
     emit q->afterRendering();
     runAndClearJobs(&afterRenderingJobs);
+
+    if (rhi)
+        context->endNextRhiFrame(renderer);
+    else
+        context->endNextFrame(renderer);
+
+    if (renderer && renderer->hasCustomRenderModeWithContinuousUpdate()) {
+        // For the overdraw visualizer. This update is not urgent so avoid a
+        // direct update() call, this is only here to keep the overdraw
+        // visualization box rotating even when the scene is static.
+        QCoreApplication::postEvent(q, new QEvent(QEvent::Type(FullUpdateRequest)));
+    }
 }
 
 QQuickWindowPrivate::QQuickWindowPrivate()
@@ -495,8 +637,9 @@ QQuickWindowPrivate::QQuickWindowPrivate()
     , activeFocusItem(nullptr)
 #if QT_CONFIG(cursor)
     , cursorItem(nullptr)
+    , cursorHandler(nullptr)
 #endif
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     , dragGrabber(nullptr)
 #endif
     , touchMouseId(-1)
@@ -523,8 +666,11 @@ QQuickWindowPrivate::QQuickWindowPrivate()
     , renderTargetId(0)
     , vaoHelper(nullptr)
     , incubationController(nullptr)
+    , hasActiveSwapchain(false)
+    , hasRenderableSwapchain(false)
+    , swapchainJustBecameRenderable(false)
 {
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     dragGrabber = new QQuickDragGrabber;
 #endif
 }
@@ -539,6 +685,7 @@ QQuickWindowPrivate::~QQuickWindowPrivate()
 void QQuickWindowPrivate::init(QQuickWindow *c, QQuickRenderControl *control)
 {
     q_ptr = c;
+
 
     Q_Q(QQuickWindow);
 
@@ -577,8 +724,12 @@ void QQuickWindowPrivate::init(QQuickWindow *c, QQuickRenderControl *control)
 
     q->setSurfaceType(windowManager ? windowManager->windowSurfaceType() : QSurface::OpenGLSurface);
     q->setFormat(sg->defaultSurfaceFormat());
+#if QT_CONFIG(vulkan)
+    if (q->surfaceType() == QSurface::VulkanSurface)
+        q->setVulkanInstance(QSGRhiSupport::vulkanInstance());
+#endif
 
-    animationController = new QQuickAnimatorController(q);
+    animationController.reset(new QQuickAnimatorController(q));
 
     QObject::connect(context, SIGNAL(initialized()), q, SIGNAL(sceneGraphInitialized()), Qt::DirectConnection);
     QObject::connect(context, SIGNAL(invalidated()), q, SIGNAL(sceneGraphInvalidated()), Qt::DirectConnection);
@@ -608,10 +759,13 @@ void QQuickWindow::handleApplicationStateChanged(Qt::ApplicationState state)
 
 QQmlListProperty<QObject> QQuickWindowPrivate::data()
 {
-    return QQmlListProperty<QObject>(q_func(), nullptr, QQuickWindowPrivate::data_append,
-                                             QQuickWindowPrivate::data_count,
-                                             QQuickWindowPrivate::data_at,
-                                             QQuickWindowPrivate::data_clear);
+    return QQmlListProperty<QObject>(q_func(), nullptr,
+                                     QQuickWindowPrivate::data_append,
+                                     QQuickWindowPrivate::data_count,
+                                     QQuickWindowPrivate::data_at,
+                                     QQuickWindowPrivate::data_clear,
+                                     QQuickWindowPrivate::data_replace,
+                                     QQuickWindowPrivate::data_removeLast);
 }
 
 static QMouseEvent *touchToMouseEvent(QEvent::Type type, const QTouchEvent::TouchPoint &p, QTouchEvent *event, QQuickItem *item, bool transformNeeded = true)
@@ -639,7 +793,7 @@ bool QQuickWindowPrivate::checkIfDoubleTapped(ulong newPressEventTimestamp, QPoi
 
     if (touchMousePressTimestamp > 0) {
         QPoint distanceBetweenPresses = newPressPos - touchMousePressPos;
-        const int doubleTapDistance = QGuiApplicationPrivate::platformTheme()->themeHint(QPlatformTheme::TouchDoubleTapDistance).toInt();
+        const int doubleTapDistance = QGuiApplication::styleHints()->touchDoubleTapDistance();
         doubleClicked = (qAbs(distanceBetweenPresses.x()) <= doubleTapDistance) && (qAbs(distanceBetweenPresses.y()) <= doubleTapDistance);
 
         if (doubleClicked) {
@@ -697,7 +851,7 @@ bool QQuickWindowPrivate::deliverTouchAsMouse(QQuickItem *item, QQuickPointerEve
             if (!item->contains(pos))
                 break;
 
-            qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << hex << p.id() << "->" << item;
+            qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << Qt::hex << p.id() << "->" << item;
             QScopedPointer<QMouseEvent> mousePress(touchToMouseEvent(QEvent::MouseButtonPress, p, event.data(), item, false));
 
             // Send a single press and see if that's accepted
@@ -739,7 +893,7 @@ bool QQuickWindowPrivate::deliverTouchAsMouse(QQuickItem *item, QQuickPointerEve
                     QCoreApplication::sendEvent(item, me.data());
                     event->setAccepted(me->isAccepted());
                     if (me->isAccepted()) {
-                        qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << hex << p.id() << "->" << mouseGrabberItem;
+                        qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << Qt::hex << p.id() << "->" << mouseGrabberItem;
                     }
                     return event->isAccepted();
                 } else {
@@ -895,8 +1049,7 @@ void QQuickWindowPrivate::translateTouchEvent(QTouchEvent *touchEvent)
     QList<QTouchEvent::TouchPoint> touchPoints = touchEvent->touchPoints();
     for (int i = 0; i < touchPoints.count(); ++i) {
         QTouchEvent::TouchPoint &touchPoint = touchPoints[i];
-
-        touchPoint.setSceneRect(touchPoint.rect());
+        touchPoint.setScenePos(touchPoint.pos());
         touchPoint.setStartScenePos(touchPoint.startPos());
         touchPoint.setLastScenePos(touchPoint.lastPos());
     }
@@ -909,6 +1062,23 @@ static inline bool windowHasFocus(QQuickWindow *win)
     const QWindow *focusWindow = QGuiApplication::focusWindow();
     return win == focusWindow || QQuickRenderControl::renderWindowFor(win) == focusWindow;
 }
+
+#ifdef Q_OS_WEBOS
+// Temporary fix for webOS until multi-seat is implemented see QTBUG-85272
+static inline bool singleWindowOnScreen(QQuickWindow *win)
+{
+    const QWindowList windowList = QGuiApplication::allWindows();
+    for (int i = 0; i < windowList.count(); i++) {
+        QWindow *ii = windowList.at(i);
+        if (ii == win)
+            continue;
+        if (ii->screen() == win->screen())
+            return false;
+    }
+
+    return true;
+}
+#endif
 
 /*!
 Set the focus inside \a scope to be \a item.
@@ -984,7 +1154,14 @@ void QQuickWindowPrivate::setFocusInScope(QQuickItem *scope, QQuickItem *item, Q
     }
 
     if (!(options & DontChangeFocusProperty)) {
-        if (item != contentItem || windowHasFocus(q)) {
+        if (item != contentItem
+                || windowHasFocus(q)
+#ifdef Q_OS_WEBOS
+        // Allow focused if there is only one window in the screen where it belongs.
+        // Temporary fix for webOS until multi-seat is implemented see QTBUG-85272
+                || singleWindowOnScreen(q)
+#endif
+                ) {
             itemPrivate->focus = true;
             changed << item;
         }
@@ -1346,7 +1523,7 @@ QQuickWindow::~QQuickWindow()
     }
 
     delete d->incubationController; d->incubationController = nullptr;
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     delete d->dragGrabber; d->dragGrabber = nullptr;
 #endif
     QQuickRootItem *root = d->contentItem;
@@ -1451,8 +1628,9 @@ bool QQuickWindow::isPersistentOpenGLContext() const
 
 
 /*!
-    Sets whether the scene graph nodes and resources can be released
-    to \a persistent.  The default value is true.
+    Sets whether the scene graph nodes and resources are \a persistent.
+    Persistent means the nodes and resources cannot be released.
+    The default value is \c true.
 
     The scene graph nodes and resources can be released to free up
     graphics resources when the window is obscured, hidden or not
@@ -1578,6 +1756,7 @@ bool QQuickWindowPrivate::clearHover(ulong timestamp)
     bool accepted = false;
     for (QQuickItem* item : qAsConst(hoverItems)) {
         accepted = sendHoverEvent(QEvent::HoverLeave, item, pos, pos, QGuiApplication::keyboardModifiers(), timestamp, true) || accepted;
+#if QT_CONFIG(cursor)
         QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
         if (itemPrivate->hasPointerHandlers()) {
             pos = q->mapFromGlobal(QCursor::pos());
@@ -1589,6 +1768,7 @@ bool QQuickWindowPrivate::clearHover(ulong timestamp)
                 if (QQuickHoverHandler *hh = qmlobject_cast<QQuickHoverHandler *>(h))
                     hh->handlePointerEvent(pointerEvent);
         }
+#endif
     }
     hoverItems.clear();
     return accepted;
@@ -1627,7 +1807,9 @@ bool QQuickWindow::event(QEvent *e)
             QGuiApplication::keyboardModifiers(), 0L, accepted);
         d->lastMousePosition = enter->windowPos();
         enter->setAccepted(accepted);
+#if QT_CONFIG(cursor)
         d->updateCursor(mapFromGlobal(QCursor::pos()));
+#endif
         return delivered;
     }
         break;
@@ -1635,7 +1817,7 @@ bool QQuickWindow::event(QEvent *e)
         d->clearHover();
         d->lastMousePosition = QPointF();
         break;
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     case QEvent::DragEnter:
     case QEvent::DragLeave:
     case QEvent::DragMove:
@@ -1685,12 +1867,37 @@ bool QQuickWindow::event(QEvent *e)
         if (d->activeFocusItem)
             QCoreApplication::sendEvent(d->activeFocusItem, e);
         return true;
+    case QEvent::LanguageChange:
+        if (d->contentItem)
+            QCoreApplication::sendEvent(d->contentItem, e);
+        break;
+    case QEvent::InputMethod:
+    case QEvent::InputMethodQuery:
+        {
+            QQuickItem *target = d->activeFocusItem;
+            // while an input method delivers the event, this window might still be inactive
+            if (!target) {
+                target = d->contentItem;
+                if (!target || !target->isEnabled())
+                    break;
+                // see setFocusInScope for a similar loop
+                while (target->isFocusScope() && target->scopedFocusItem() && target->scopedFocusItem()->isEnabled())
+                    target = target->scopedFocusItem();
+            }
+            if (target) {
+                QCoreApplication::sendEvent(target, e);
+                return true;
+            }
+        }
+        break;
     default:
         break;
     }
 
     if (e->type() == QEvent::Type(QQuickWindowPrivate::FullUpdateRequest))
         update();
+    else if (e->type() == QEvent::Type(QQuickWindowPrivate::TriggerContextCreationFailure))
+        d->windowManager->handleContextCreationFailure(this);
 
     return QWindow::event(e);
 }
@@ -1717,6 +1924,13 @@ void QQuickWindowPrivate::deliverKeyEvent(QKeyEvent *e)
 {
     if (activeFocusItem) {
         QQuickItem *item = activeFocusItem;
+
+        // In case of generated event, trigger ShortcutOverride event
+        if (e->type() == QEvent::KeyPress && e->spontaneous() == false)
+                qt_sendShortcutOverrideEvent(item, e->timestamp(),
+                                         e->key(), e->modifiers(), e->text(),
+                                         e->isAutoRepeat(), e->count());
+
         e->accept();
         QCoreApplication::sendEvent(item, e);
         while (!e->isAccepted() && (item = item->parentItem())) {
@@ -2032,6 +2246,17 @@ void QQuickWindow::wheelEvent(QWheelEvent *event)
 }
 #endif // wheelevent
 
+#if QT_CONFIG(tabletevent)
+/*! \reimp */
+void QQuickWindow::tabletEvent(QTabletEvent *event)
+{
+    Q_D(QQuickWindow);
+    qCDebug(lcTablet) << event;
+    // TODO Qt 6: make sure TabletEnterProximity and TabletLeaveProximity are delivered here
+    d->deliverPointerEvent(d->pointerEventInstance(event));
+}
+#endif // tabletevent
+
 bool QQuickWindowPrivate::deliverTouchCancelEvent(QTouchEvent *event)
 {
     qCDebug(DBG_TOUCH) << event;
@@ -2251,6 +2476,9 @@ void QQuickWindowPrivate::flushFrameSynchronousEvents()
             ut->startAnimations();
     }
 
+    // In webOS we already have the alternative to the issue that this
+    // wanted to address and thus skipping this part won't break anything.
+#if !defined(Q_OS_WEBOS)
     // Once per frame, if any items are dirty, send a synthetic hover,
     // in case items have changed position, visibility, etc.
     // For instance, during animation (including the case of a ListView
@@ -2262,6 +2490,7 @@ void QQuickWindowPrivate::flushFrameSynchronousEvents()
         if (!delivered)
             clearHover(); // take care of any exits
     }
+#endif
 }
 
 QQuickPointerEvent *QQuickWindowPrivate::queryPointerEventInstance(QQuickPointerDevice *device, QEvent::Type eventType) const
@@ -2310,8 +2539,14 @@ QQuickPointerEvent *QQuickWindowPrivate::pointerEventInstance(QQuickPointerDevic
 #endif
             ev = new QQuickPointerTouchEvent(q, device);
         break;
+#if QT_CONFIG(tabletevent)
+    case QQuickPointerDevice::Stylus:
+    case QQuickPointerDevice::Airbrush:
+    case QQuickPointerDevice::Puck:
+        ev = new QQuickPointerTabletEvent(q, device);
+        break;
+#endif
     default:
-        // TODO tablet event types
         break;
     }
     pointerEventInstances << ev;
@@ -2342,7 +2577,15 @@ QQuickPointerEvent *QQuickWindowPrivate::pointerEventInstance(QEvent *event) con
     case QEvent::TouchCancel:
         dev = QQuickPointerDevice::touchDevice(static_cast<QTouchEvent *>(event)->device());
         break;
-    // TODO tablet event types
+#if QT_CONFIG(tabletevent)
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+    case QEvent::TabletEnterProximity:
+    case QEvent::TabletLeaveProximity:
+        dev = QQuickPointerDevice::tabletDevice(static_cast<QTabletEvent *>(event));
+        break;
+#endif
 #if QT_CONFIG(gestures)
     case QEvent::NativeGesture:
         dev = QQuickPointerDevice::touchDevice(static_cast<QNativeGestureEvent *>(event)->device());
@@ -2377,6 +2620,11 @@ void QQuickWindowPrivate::deliverPointerEvent(QQuickPointerEvent *event)
         deliverTouchEvent(event->asPointerTouchEvent());
     } else {
         deliverSinglePointEventUntilAccepted(event);
+        // If any handler got interested in the tablet event, we don't want to receive a synth-mouse event from QtGui
+        // TODO Qt 6: QTabletEvent will be accepted by default, like other events
+        if (event->asPointerTabletEvent() &&
+                (!event->point(0)->passiveGrabbers().isEmpty() || event->point(0)->exclusiveGrabber()))
+            event->setAccepted(true);
     }
 
     event->reset(nullptr);
@@ -2466,7 +2714,7 @@ void QQuickWindowPrivate::deliverTouchEvent(QQuickPointerTouchEvent *event)
         QQuickEventPoint *point = event->point(i);
         if (point->state() == QQuickEventPoint::Released) {
             int id = point->pointId();
-            qCDebug(DBG_TOUCH_TARGET) << "TP" << hex << id << "released";
+            qCDebug(DBG_TOUCH_TARGET) << "TP" << Qt::hex << id << "released";
             point->setGrabberItem(nullptr);
             if (id == touchMouseId)
                 cancelTouchMouseSynthesis();
@@ -2563,7 +2811,7 @@ bool QQuickWindowPrivate::deliverPressOrReleaseEvent(QQuickPointerEvent *event, 
             if (point->grabberPointerHandler())
                 cancelTouchMouseSynthesis();
         } else {
-            qCWarning(DBG_TOUCH_TARGET) << "during delivery of touch press, synth-mouse ID" << hex << touchMouseId << "is missing from" << event;
+            qCWarning(DBG_TOUCH_TARGET) << "during delivery of touch press, synth-mouse ID" << Qt::hex << touchMouseId << "is missing from" << event;
         }
     }
     for (int i = 0; i < pointCount; ++i) {
@@ -2691,7 +2939,7 @@ void QQuickWindowPrivate::deliverMatchingPointsToItem(QQuickItem *item, QQuickPo
         // If the touch was accepted (regardless by whom or in what form),
         // update accepted new points.
         bool isPressOrRelease = pointerEvent->isPressEvent() || pointerEvent->isReleaseEvent();
-        for (auto point: qAsConst(touchEvent->touchPoints())) {
+        for (const auto &point: qAsConst(touchEvent->touchPoints())) {
             if (auto pointerEventPoint = ptEvent->pointById(point.id())) {
                 pointerEventPoint->setAccepted();
                 if (isPressOrRelease)
@@ -2701,11 +2949,11 @@ void QQuickWindowPrivate::deliverMatchingPointsToItem(QQuickItem *item, QQuickPo
     } else {
         // But if the event was not accepted then we know this item
         // will not be interested in further updates for those touchpoint IDs either.
-        for (auto point: qAsConst(touchEvent->touchPoints())) {
+        for (const auto &point: qAsConst(touchEvent->touchPoints())) {
             if (point.state() == Qt::TouchPointPressed) {
                 if (auto *tp = ptEvent->pointById(point.id())) {
                     if (tp->exclusiveGrabber() == item) {
-                        qCDebug(DBG_TOUCH_TARGET) << "TP" << hex << point.id() << "disassociated";
+                        qCDebug(DBG_TOUCH_TARGET) << "TP" << Qt::hex << point.id() << "disassociated";
                         tp->setGrabberItem(nullptr);
                     }
                 }
@@ -2714,7 +2962,7 @@ void QQuickWindowPrivate::deliverMatchingPointsToItem(QQuickItem *item, QQuickPo
     }
 }
 
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
 void QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QEvent *event)
 {
     grabber->resetTarget();
@@ -2743,32 +2991,49 @@ void QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QEvent *e
             for (; grabItem != grabber->end(); grabItem = grabber->release(grabItem))
                 QCoreApplication::sendEvent(**grabItem, &leaveEvent);
             return;
-        } else for (; grabItem != grabber->end(); grabItem = grabber->release(grabItem)) {
+        } else {
             QDragMoveEvent *moveEvent = static_cast<QDragMoveEvent *>(event);
-            if (deliverDragEvent(grabber, **grabItem, moveEvent)) {
-                for (++grabItem; grabItem != grabber->end();) {
-                    QPointF p = (**grabItem)->mapFromScene(moveEvent->pos());
-                    if ((**grabItem)->contains(p)) {
-                        QDragMoveEvent translatedEvent(
-                                p.toPoint(),
-                                moveEvent->possibleActions(),
-                                moveEvent->mimeData(),
-                                moveEvent->mouseButtons(),
-                                moveEvent->keyboardModifiers());
-                        QQuickDropEventEx::copyActions(&translatedEvent, *moveEvent);
-                        QCoreApplication::sendEvent(**grabItem, &translatedEvent);
-                        ++grabItem;
-                    } else {
-                        QDragLeaveEvent leaveEvent;
-                        QCoreApplication::sendEvent(**grabItem, &leaveEvent);
-                        grabItem = grabber->release(grabItem);
-                    }
+
+            // Used to ensure we don't send DragEnterEvents to current drop targets,
+            // and to detect which current drop targets we have left
+            QVarLengthArray<QQuickItem*, 64> currentGrabItems;
+            for (; grabItem != grabber->end(); grabItem = grabber->release(grabItem))
+                currentGrabItems.append(**grabItem);
+
+            // Look for any other potential drop targets that are higher than the current ones
+            QDragEnterEvent enterEvent(
+                    moveEvent->pos(),
+                    moveEvent->possibleActions(),
+                    moveEvent->mimeData(),
+                    moveEvent->mouseButtons(),
+                    moveEvent->keyboardModifiers());
+            QQuickDropEventEx::copyActions(&enterEvent, *moveEvent);
+            event->setAccepted(deliverDragEvent(grabber, contentItem, &enterEvent, &currentGrabItems));
+
+            for (grabItem = grabber->begin(); grabItem != grabber->end(); ++grabItem) {
+                int i = currentGrabItems.indexOf(**grabItem);
+                if (i >= 0) {
+                    currentGrabItems.remove(i);
+                    // Still grabbed: send move event
+                    QDragMoveEvent translatedEvent(
+                            (**grabItem)->mapFromScene(moveEvent->pos()).toPoint(),
+                            moveEvent->possibleActions(),
+                            moveEvent->mimeData(),
+                            moveEvent->mouseButtons(),
+                            moveEvent->keyboardModifiers());
+                    QQuickDropEventEx::copyActions(&translatedEvent, *moveEvent);
+                    QCoreApplication::sendEvent(**grabItem, &translatedEvent);
+                    event->setAccepted(translatedEvent.isAccepted());
+                    QQuickDropEventEx::copyActions(moveEvent, translatedEvent);
                 }
-                return;
-            } else {
-                QDragLeaveEvent leaveEvent;
-                QCoreApplication::sendEvent(**grabItem, &leaveEvent);
             }
+
+            // Anything left in currentGrabItems is no longer a drop target and should be sent a DragLeaveEvent
+            QDragLeaveEvent leaveEvent;
+            for (QQuickItem *i : currentGrabItems)
+                QCoreApplication::sendEvent(i, &leaveEvent);
+
+            return;
         }
     }
     if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
@@ -2784,9 +3049,8 @@ void QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QEvent *e
     }
 }
 
-bool QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QQuickItem *item, QDragMoveEvent *event)
+bool QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QQuickItem *item, QDragMoveEvent *event, QVarLengthArray<QQuickItem*, 64> *currentGrabItems)
 {
-    bool accepted = false;
     QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
     if (!item->isVisible() || !item->isEnabled() || QQuickItemPrivate::get(item)->culled)
         return false;
@@ -2805,12 +3069,24 @@ bool QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QQuickIte
             event->keyboardModifiers());
     QQuickDropEventEx::copyActions(&enterEvent, *event);
     QList<QQuickItem *> children = itemPrivate->paintOrderChildItems();
+
+    // Check children in front of this item first
     for (int ii = children.count() - 1; ii >= 0; --ii) {
-        if (deliverDragEvent(grabber, children.at(ii), &enterEvent))
+        if (children.at(ii)->z() < 0)
+            continue;
+        if (deliverDragEvent(grabber, children.at(ii), &enterEvent, currentGrabItems))
             return true;
     }
 
     if (itemContained) {
+        // If this item is currently grabbed, don't send it another DragEnter,
+        // just grab it again if it's still contained.
+        if (currentGrabItems && currentGrabItems->contains(item)) {
+            grabber->grab(item);
+            grabber->setTarget(item);
+            return true;
+        }
+
         if (event->type() == QEvent::DragMove || itemPrivate->flags & QQuickItem::ItemAcceptsDrops) {
             QDragMoveEvent translatedEvent(
                     p.toPoint(),
@@ -2827,43 +3103,53 @@ bool QQuickWindowPrivate::deliverDragEvent(QQuickDragGrabber *grabber, QQuickIte
             if (event->type() == QEvent::DragEnter) {
                 if (translatedEvent.isAccepted()) {
                     grabber->grab(item);
-                    accepted = true;
+                    grabber->setTarget(item);
+                    return true;
                 }
             } else {
-                accepted = true;
+                return true;
             }
         }
     }
 
-    return accepted;
+    // Check children behind this item if this item or any higher children have not accepted
+    for (int ii = children.count() - 1; ii >= 0; --ii) {
+        if (children.at(ii)->z() >= 0)
+            continue;
+        if (deliverDragEvent(grabber, children.at(ii), &enterEvent, currentGrabItems))
+            return true;
+    }
+
+    return false;
 }
-#endif // draganddrop
+#endif // quick_draganddrop
 
 #if QT_CONFIG(cursor)
 void QQuickWindowPrivate::updateCursor(const QPointF &scenePos)
 {
     Q_Q(QQuickWindow);
 
-    QQuickItem *oldCursorItem = cursorItem;
-    cursorItem = findCursorItem(contentItem, scenePos);
+    auto cursorItemAndHandler = findCursorItemAndHandler(contentItem, scenePos);
 
-    if (cursorItem != oldCursorItem) {
+    if (cursorItem != cursorItemAndHandler.first || cursorHandler != cursorItemAndHandler.second) {
         QWindow *renderWindow = QQuickRenderControl::renderWindowFor(q);
         QWindow *window = renderWindow ? renderWindow : q;
+        cursorItem = cursorItemAndHandler.first;
+        cursorHandler = cursorItemAndHandler.second;
         if (cursorItem)
-            window->setCursor(cursorItem->cursor());
+            window->setCursor(QQuickItemPrivate::get(cursorItem)->effectiveCursor(cursorHandler));
         else
             window->unsetCursor();
     }
 }
 
-QQuickItem *QQuickWindowPrivate::findCursorItem(QQuickItem *item, const QPointF &scenePos)
+QPair<QQuickItem*, QQuickPointerHandler*> QQuickWindowPrivate::findCursorItemAndHandler(QQuickItem *item, const QPointF &scenePos) const
 {
     QQuickItemPrivate *itemPrivate = QQuickItemPrivate::get(item);
     if (itemPrivate->flags & QQuickItem::ItemClipsChildrenToShape) {
         QPointF p = item->mapFromScene(scenePos);
         if (!item->contains(p))
-            return nullptr;
+            return {nullptr, nullptr};
     }
 
     if (itemPrivate->subtreeCursorEnabled) {
@@ -2872,17 +3158,28 @@ QQuickItem *QQuickWindowPrivate::findCursorItem(QQuickItem *item, const QPointF 
             QQuickItem *child = children.at(ii);
             if (!child->isVisible() || !child->isEnabled() || QQuickItemPrivate::get(child)->culled)
                 continue;
-            if (QQuickItem *cursorItem = findCursorItem(child, scenePos))
-                return cursorItem;
+            auto ret = findCursorItemAndHandler(child, scenePos);
+            if (ret.first)
+                return ret;
+        }
+        if (itemPrivate->hasCursorHandler) {
+            if (auto handler = itemPrivate->effectiveCursorHandler()) {
+                QQuickPointerEvent *pointerEvent = pointerEventInstance(QQuickPointerDevice::genericMouseDevice(), QEvent::MouseMove);
+                pointerEvent->point(0)->reset(Qt::TouchPointMoved, scenePos, quint64(1) << 24 /* mouse has device ID 1 */, 0);
+                pointerEvent->point(0)->setAccepted(true);
+                pointerEvent->localize(item);
+                if (handler->parentContains(pointerEvent->point(0)))
+                    return {item, handler};
+            }
+        }
+        if (itemPrivate->hasCursor) {
+            QPointF p = item->mapFromScene(scenePos);
+            if (item->contains(p))
+                return {item, nullptr};
         }
     }
 
-    if (itemPrivate->hasCursor) {
-        QPointF p = item->mapFromScene(scenePos);
-        if (item->contains(p))
-            return item;
-    }
-    return nullptr;
+    return {nullptr, nullptr};
 }
 #endif
 
@@ -2942,7 +3239,7 @@ bool QQuickWindowPrivate::sendFilteredPointerEventImpl(QQuickPointerEvent *event
                     if (filteringParent->childMouseEventFilter(receiver, filteringParentTouchEvent.data())) {
                         qCDebug(DBG_TOUCH) << "touch event intercepted by childMouseEventFilter of " << filteringParent;
                         skipDelivery.append(filteringParent);
-                        for (auto point: qAsConst(filteringParentTouchEvent->touchPoints())) {
+                        for (const auto &point: qAsConst(filteringParentTouchEvent->touchPoints())) {
                             QQuickEventPoint *pt = event->pointById(point.id());
                             pt->setAccepted();
                             pt->setGrabberItem(filteringParent);
@@ -2984,7 +3281,7 @@ bool QQuickWindowPrivate::sendFilteredPointerEventImpl(QQuickPointerEvent *event
                                     qCDebug(DBG_TOUCH) << "touch event intercepted as synth mouse event by childMouseEventFilter of " << filteringParent;
                                     skipDelivery.append(filteringParent);
                                     if (t != QEvent::MouseButtonRelease) {
-                                        qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << hex << tp.id() << "->" << filteringParent;
+                                        qCDebug(DBG_TOUCH_TARGET) << "TP (mouse)" << Qt::hex << tp.id() << "->" << filteringParent;
                                         pointerEventInstance(dev)->pointById(tp.id())->setGrabberItem(filteringParent);
                                         touchMouseUnset = false; // We want to leave touchMouseId and touchMouseDevice set
                                         if (mouseEvent->isAccepted())
@@ -3042,6 +3339,18 @@ bool QQuickWindowPrivate::dragOverThreshold(qreal d, Qt::Axis axis, QMouseEvent 
     if (dragVelocityLimitAvailable) {
         QVector2D velocityVec = QGuiApplicationPrivate::mouseEventVelocity(event);
         qreal velocity = axis == Qt::XAxis ? velocityVec.x() : velocityVec.y();
+        overThreshold |= qAbs(velocity) > styleHints->startDragVelocity();
+    }
+    return overThreshold;
+}
+
+bool QQuickWindowPrivate::dragOverThreshold(qreal d, Qt::Axis axis, const QTouchEvent::TouchPoint *tp, int startDragThreshold)
+{
+    QStyleHints *styleHints = qApp->styleHints();
+    bool overThreshold = qAbs(d) > (startDragThreshold >= 0 ? startDragThreshold : styleHints->startDragDistance());
+    const bool dragVelocityLimitAvailable = (styleHints->startDragVelocity() > 0);
+    if (!overThreshold && dragVelocityLimitAvailable) {
+        qreal velocity = axis == Qt::XAxis ? tp->velocity().x() : tp->velocity().y();
         overThreshold |= qAbs(velocity) > styleHints->startDragVelocity();
     }
     return overThreshold;
@@ -3113,6 +3422,20 @@ void QQuickWindowPrivate::data_clear(QQmlListProperty<QObject> *property)
     itemProperty.clear(&itemProperty);
 }
 
+void QQuickWindowPrivate::data_replace(QQmlListProperty<QObject> *property, int i, QObject *o)
+{
+    QQuickWindow *win = static_cast<QQuickWindow*>(property->object);
+    QQmlListProperty<QObject> itemProperty = QQuickItemPrivate::get(win->contentItem())->data();
+    itemProperty.replace(&itemProperty, i, o);
+}
+
+void QQuickWindowPrivate::data_removeLast(QQmlListProperty<QObject> *property)
+{
+    QQuickWindow *win = static_cast<QQuickWindow*>(property->object);
+    QQmlListProperty<QObject> itemProperty = QQuickItemPrivate::get(win->contentItem())->data();
+    itemProperty.removeLast(&itemProperty);
+}
+
 bool QQuickWindowPrivate::isRenderable() const
 {
     Q_Q(const QQuickWindow);
@@ -3121,10 +3444,9 @@ bool QQuickWindowPrivate::isRenderable() const
 
 void QQuickWindowPrivate::contextCreationFailureMessage(const QSurfaceFormat &format,
                                                         QString *translatedMessage,
-                                                        QString *untranslatedMessage,
-                                                        bool isEs)
+                                                        QString *untranslatedMessage)
 {
-    const QString contextType = QLatin1String(isEs ? "EGL" : "OpenGL");
+    const QString contextType = QLatin1String("OpenGL");
     QString formatStr;
     QDebug(&formatStr) << format;
 #if defined(Q_OS_WIN32)
@@ -3147,6 +3469,16 @@ void QQuickWindowPrivate::contextCreationFailureMessage(const QSurfaceFormat &fo
     *translatedMessage = QQuickWindow::tr(msg).arg(contextType, formatStr);
     *untranslatedMessage = QString::fromLatin1(msg).arg(contextType, formatStr);
 #endif // !Q_OS_WIN32
+}
+
+void QQuickWindowPrivate::rhiCreationFailureMessage(const QString &backendName,
+                                                    QString *translatedMessage,
+                                                    QString *untranslatedMessage)
+{
+    const char msg[] = QT_TRANSLATE_NOOP("QQuickWindow",
+        "Failed to initialize graphics backend for %1.");
+    *translatedMessage = QQuickWindow::tr(msg).arg(backendName);
+    *untranslatedMessage = QString::fromLatin1(msg).arg(backendName);
 }
 
 #if QT_DEPRECATED_SINCE(5, 8)
@@ -3625,24 +3957,20 @@ void QQuickWindow::setTransientParent_helper(QQuickWindow *window)
 /*!
     Returns the OpenGL context used for rendering.
 
-    If the scene graph is not ready, or the scene graph is not using OpenGL,
-    this function will return null.
-
-    \note If using a scene graph adaptation other than OpenGL this
-    function will return nullptr.
+    \note If the scene graph is not ready, or the scene graph is not using
+    OpenGL (or RHI over OpenGL), this function will return null.
 
     \sa sceneGraphInitialized(), sceneGraphInvalidated()
  */
-
 QOpenGLContext *QQuickWindow::openglContext() const
 {
 #if QT_CONFIG(opengl)
     Q_D(const QQuickWindow);
     if (d->context && d->context->isValid()) {
         QSGRendererInterface *rif = d->context->sceneGraphContext()->rendererInterface(d->context);
-        if (rif && rif->graphicsApi() == QSGRendererInterface::OpenGL) {
-            auto openglRenderContext = static_cast<const QSGDefaultRenderContext *>(d->context);
-            return openglRenderContext->openglContext();
+        if (rif) {
+            return reinterpret_cast<QOpenGLContext *>(rif->getResource(const_cast<QQuickWindow *>(this),
+                                                                       QSGRendererInterface::OpenGLContextResource));
         }
     }
 #endif
@@ -3668,6 +3996,13 @@ bool QQuickWindow::isSceneGraphInitialized() const
     This signal will be emitted from the scene graph rendering thread.
 */
 
+/*!
+    \qmlsignal QtQuick.Window::Window::frameSwapped()
+
+    This signal is emitted when a frame has been queued for presenting. With
+    vertical synchronization enabled the signal is emitted at most once per
+    vsync interval in a continuously animating scene.
+ */
 
 /*!
     \fn void QQuickWindow::sceneGraphInitialized()
@@ -3675,9 +4010,12 @@ bool QQuickWindow::isSceneGraphInitialized() const
     This signal is emitted when the scene graph has been initialized.
 
     This signal will be emitted from the scene graph rendering thread.
-
  */
 
+/*!
+    \qmlsignal QtQuick.Window::Window::sceneGraphInitialized()
+    \internal
+ */
 
 /*!
     \fn void QQuickWindow::sceneGraphInvalidated()
@@ -3697,6 +4035,11 @@ bool QQuickWindow::isSceneGraphInitialized() const
  */
 
 /*!
+    \qmlsignal QtQuick.Window::Window::sceneGraphInvalidated()
+    \internal
+ */
+
+/*!
     \fn void QQuickWindow::sceneGraphError(SceneGraphError error, const QString &message)
 
     This signal is emitted when an \a error occurred during scene graph initialization.
@@ -3706,7 +4049,20 @@ bool QQuickWindow::isSceneGraphInitialized() const
     connected to the signal, the behavior will be different: Quick will print
     the \a message, or show a message box, and terminate the application.
 
-    This signal will be emitted from the gui thread.
+    This signal will be emitted from the GUI thread.
+
+    \since 5.3
+ */
+
+/*!
+    \qmlsignal QtQuick.Window::Window::sceneGraphError(SceneGraphError error, QString message)
+
+    This signal is emitted when an \a error occurred during scene graph initialization.
+
+    You can implement onSceneGraphError(error, message) to handle errors,
+    such as graphics context creation failures, in a custom way.
+    If no handler is connected to this signal, Quick will print the \a message,
+    or show a message box, and terminate the application.
 
     \since 5.3
  */
@@ -3766,8 +4122,6 @@ bool QQuickWindow::isSceneGraphInitialized() const
     property is true by default so that the window is allowed to close; but you
     can implement an \c onClosing handler and set \c {close.accepted = false} if
     you need to do something else before the window can be closed.
-
-    The corresponding handler is \c onClosing.
  */
 
 #if QT_CONFIG(opengl)
@@ -3781,6 +4135,8 @@ bool QQuickWindow::isSceneGraphInitialized() const
     This function only has an effect when using the default OpenGL scene
     graph adaptation.
 
+    \note This function has no effect when running on the RHI graphics abstraction.
+
     \warning
     This function can only be called from the thread doing
     the rendering.
@@ -3789,6 +4145,9 @@ bool QQuickWindow::isSceneGraphInitialized() const
 void QQuickWindow::setRenderTarget(QOpenGLFramebufferObject *fbo)
 {
     Q_D(QQuickWindow);
+    if (d->rhi)
+        return;
+
     if (d->context && QThread::currentThread() != d->context->thread()) {
         qWarning("QQuickWindow::setRenderTarget: Cannot set render target from outside the rendering thread");
         return;
@@ -3870,9 +4229,11 @@ QSize QQuickWindow::renderTargetSize() const
     The default is to render to the surface of the window, in which
     case the render target is 0.
 
-    \note
-    This function will return nullptr when not using the OpenGL scene
+    \note This function will return nullptr when not using the OpenGL scene
     graph adaptation.
+
+    \note This function has no effect and returns nullptr when running on the
+    RHI graphics abstraction.
  */
 QOpenGLFramebufferObject *QQuickWindow::renderTarget() const
 {
@@ -3898,12 +4259,23 @@ QImage QQuickWindow::grabWindow()
     Q_D(QQuickWindow);
 
     if (!isVisible() && !d->renderControl) {
+        // backends like software and d3d12 can grab regardless of the window state
         if (d->windowManager && (d->windowManager->flags() & QSGRenderLoop::SupportsGrabWithoutExpose))
             return d->windowManager->grab(this);
     }
 
-#if QT_CONFIG(opengl)
     if (!isVisible() && !d->renderControl) {
+        if (d->rhi) {
+            // ### we may need a full offscreen round when non-exposed...
+
+            if (d->renderControl)
+                return d->renderControl->grab();
+            else if (d->windowManager)
+                return d->windowManager->grab(this);
+            return QImage();
+        }
+
+#if QT_CONFIG(opengl)
         auto openglRenderContext = static_cast<QSGDefaultRenderContext *>(d->context);
         if (!openglRenderContext->openglContext()) {
             if (!handle() || !size().isValid()) {
@@ -3916,7 +4288,9 @@ QImage QQuickWindow::grabWindow()
             context.setShareContext(qt_gl_global_share_context());
             context.create();
             context.makeCurrent(this);
-            d->context->initialize(&context);
+            QSGDefaultRenderContext::InitParams rcParams;
+            rcParams.openGLContext = &context;
+            d->context->initialize(&rcParams);
 
             d->polishItems();
             d->syncSceneGraph();
@@ -3931,8 +4305,9 @@ QImage QQuickWindow::grabWindow()
 
             return image;
         }
-    }
 #endif
+    }
+
     if (d->renderControl)
         return d->renderControl->grab();
     else if (d->windowManager)
@@ -4037,6 +4412,11 @@ QQmlIncubationController *QQuickWindow::incubationController() const
 */
 
 /*!
+    \qmlsignal QtQuick.Window::Window::beforeSynchronizing()
+    \internal
+*/
+
+/*!
     \fn void QQuickWindow::afterSynchronizing()
 
     This signal is emitted after the scene graph is synchronized with the QML state.
@@ -4060,6 +4440,12 @@ QQmlIncubationController *QQuickWindow::incubationController() const
  */
 
 /*!
+    \qmlsignal QtQuick.Window::Window::afterSynchronizing()
+    \internal
+    \since 5.3
+ */
+
+/*!
     \fn void QQuickWindow::beforeRendering()
 
     This signal is emitted before the scene starts rendering.
@@ -4069,6 +4455,19 @@ QQmlIncubationController *QQuickWindow::incubationController() const
 
     The OpenGL context used for rendering the scene graph will be bound
     at this point.
+
+    When using the RHI, the signal is emitted after the preparations for the
+    frame have been done, meaning there is a command buffer in recording mode,
+    where applicable. If desired, the slot function connected to this signal
+    can query native resources like the command before via
+    QSGRendererInterface. Note however that the recording of the main render
+    pass is not yet started at this point and it is not possible to add
+    commands within that pass. Starting a pass means clearing the color, depth,
+    and stencil buffers so it is not possible to achieve an underlay type of
+    rendering by just connecting to this signal. Rather, connect to
+    beforeRenderPassRecording(). However, connecting to this signal is still
+    important if the recording of copy type of commands is desired since those
+    cannot be enqueued within a render pass.
 
     \warning This signal is emitted from the scene graph rendering thread. If your
     slot function needs to finish before execution continues, you must make sure that
@@ -4082,6 +4481,11 @@ QQmlIncubationController *QQuickWindow::incubationController() const
 */
 
 /*!
+    \qmlsignal QtQuick.Window::Window::beforeRendering()
+    \internal
+*/
+
+/*!
     \fn void QQuickWindow::afterRendering()
 
     This signal is emitted after the scene has completed rendering, before swapbuffers is called.
@@ -4090,6 +4494,18 @@ QQmlIncubationController *QQuickWindow::incubationController() const
     or to do screen scraping of the current frame buffer.
 
     The OpenGL context used for rendering the scene graph will be bound at this point.
+
+    When using the RHI, the signal is emitted after scene graph has added its
+    commands to the command buffer, which is not yet submitted to the graphics
+    queue. If desired, the slot function connected to this signal can query
+    native resources, like the command buffer, before via QSGRendererInterface.
+    Note however that the render pass (or passes) are already recorded at this
+    point and it is not possible to add more commands within the scenegraph's
+    pass. Instead, use afterRenderPassRecording() for that. This signal has
+    therefore limited use and is rarely needed in an RHI-based setup. Rather,
+    it is the combination of beforeRendering() + beforeRenderPassRecording() or
+    beforeRendering() + afterRenderPassRecording() that is typically used to
+    achieve under- or overlaying of the custom rendering.
 
     \warning This signal is emitted from the scene graph rendering thread. If your
     slot function needs to finish before execution continues, you must make sure that
@@ -4103,14 +4519,106 @@ QQmlIncubationController *QQuickWindow::incubationController() const
  */
 
 /*!
+    \qmlsignal QtQuick.Window::Window::afterRendering()
+    \internal
+ */
+
+/*!
+    \fn void QQuickWindow::beforeRenderPassRecording()
+
+    This signal is emitted before the scenegraph starts recording commands for
+    the main render pass. (Layers have their own passes and are fully recorded
+    by the time this signal is emitted.) The render pass is already active on
+    the command buffer when the signal is emitted.
+
+    This signal is applicable when using the RHI graphics abstraction with the
+    scenegraph. It is emitted later than beforeRendering() and it guarantees
+    that not just the frame, but also the recording of the scenegraph's main
+    render pass is active. This allows inserting commands without having to
+    generate an entire, separate render pass (which would typically clear the
+    attached images). The native graphics objects can be queried via
+    QSGRendererInterface.
+
+    When not running with the RHI (and using OpenGL directly), the signal is
+    emitted after the renderer has cleared the render target. This makes it
+    possible to create applications that function identically both with and
+    without the RHI.
+
+    \note Resource updates (uploads, copies) typically cannot be enqueued from
+    within a render pass. Therefore, more complex user rendering will need to
+    connect to both beforeRendering() and this signal.
+
+    \warning This signal is emitted from the scene graph rendering thread. If your
+    slot function needs to finish before execution continues, you must make sure that
+    the connection is direct (see Qt::ConnectionType).
+
+    \since 5.14
+*/
+
+/*!
+    \qmlsignal QtQuick.Window::Window::beforeRenderPassRecording()
+    \internal
+    \since 5.14
+*/
+
+/*!
+    \fn void QQuickWindow::afterRenderPassRecording()
+
+    This signal is emitted after the scenegraph has recorded the commands for
+    its main render pass, but the pass is not yet finalized on the command
+    buffer.
+
+    This signal is applicable when using the RHI graphics abstraction with the
+    scenegraph. It is emitted earlier than afterRendering() and it guarantees
+    that not just the frame, but also the recording of the scenegraph's main
+    render pass is still active. This allows inserting commands without having
+    to generate an entire, separate render pass (which would typically clear
+    the attached images). The native graphics objects can be queried via
+    QSGRendererInterface.
+
+    When not running with the RHI (and using OpenGL directly), the signal is
+    emitted after the renderer has finished its rendering, but before
+    afterRendering(). This makes it possible to create applications that
+    function identically both with and without the RHI.
+
+    \note Resource updates (uploads, copies) typically cannot be enqueued from
+    within a render pass. Therefore, more complex user rendering will need to
+    connect to both beforeRendering() and this signal.
+
+    \warning This signal is emitted from the scene graph rendering thread. If your
+    slot function needs to finish before execution continues, you must make sure that
+    the connection is direct (see Qt::ConnectionType).
+
+    \since 5.14
+*/
+
+/*!
+    \qmlsignal QtQuick.Window::Window::afterRenderPassRecording()
+    \internal
+    \since 5.14
+*/
+
+/*!
     \fn void QQuickWindow::afterAnimating()
 
-    This signal is emitted on the gui thread before requesting the render thread to
+    This signal is emitted on the GUI thread before requesting the render thread to
     perform the synchronization of the scene graph.
 
-    Unlike the other similar signals, this one is emitted on the gui thread instead
-    of the render thread. It can be used to synchronize external animation systems
-    with the QML content.
+    Unlike the other similar signals, this one is emitted on the GUI thread
+    instead of the render thread. It can be used to synchronize external
+    animation systems with the QML content. At the same time this means that
+    this signal is not suitable for triggering graphics operations.
+
+    \since 5.3
+ */
+
+/*!
+    \qmlsignal QtQuick.Window::Window::afterAnimating()
+
+    This signal is emitted on the GUI thread before requesting the render thread to
+    perform the synchronization of the scene graph.
+
+    You can implement onAfterAnimating to do additional processing after each animation step.
 
     \since 5.3
  */
@@ -4118,7 +4626,7 @@ QQmlIncubationController *QQuickWindow::incubationController() const
 /*!
     \fn void QQuickWindow::openglContextCreated(QOpenGLContext *context)
 
-    This signal is emitted on the gui thread when the OpenGL \a context
+    This signal is emitted on the GUI thread when the OpenGL \a context
     for this window is created, before it is made current.
 
     Some implementations will share the same OpenGL context between
@@ -4127,13 +4635,19 @@ QQmlIncubationController *QQuickWindow::incubationController() const
     OpenGL context is actually created.
 
     QQuickWindow::openglContext() will still return 0 for this window
-    until after the QQuickWindow::sceneGraphInitialize() has been
+    until after the QQuickWindow::sceneGraphInitialized() has been
     emitted.
 
     \note
     This signal will only be emmited when using the default OpenGL scene
     graph adaptation.
 
+    \since 5.3
+ */
+
+/*!
+    \qmlsignal QtQuick.Window::Window::openglContextCreated()
+    \internal
     \since 5.3
  */
 
@@ -4160,6 +4674,11 @@ QQmlIncubationController *QQuickWindow::incubationController() const
     \since 5.3
  */
 
+/*!
+    \qmlsignal QtQuick.Window::Window::sceneGraphAboutToStop()
+    \internal
+    \since 5.3
+ */
 
 /*!
     Sets whether the scene graph rendering of QML should clear the color buffer
@@ -4170,7 +4689,15 @@ QQmlIncubationController *QQuickWindow::incubationController() const
 
     The color buffer is cleared by default.
 
-    \sa beforeRendering()
+    \warning This flag is ignored completely when running with the RHI graphics
+    abstraction instead of using OpenGL directly. As explicit clear commands
+    simply do not exist in some modern APIs, the scene graph cannot offer this
+    flexibility anymore. The images associated with a render target will always
+    get cleared when a render pass starts. As a solution, an alternative to
+    disabling scene graph issued clears is provided in form of the
+    beforeRenderPassRecording() signal.
+
+    \sa beforeRendering(), beforeRenderPassRecording()
  */
 
 void QQuickWindow::setClearBeforeRendering(bool enabled)
@@ -4197,7 +4724,7 @@ bool QQuickWindow::clearBeforeRendering() const
 
 QSGTexture *QQuickWindow::createTextureFromImage(const QImage &image) const
 {
-    return createTextureFromImage(image, nullptr);
+    return createTextureFromImage(image, {});
 }
 
 
@@ -4255,7 +4782,7 @@ QSGTexture *QQuickWindow::createTextureFromImage(const QImage &image, CreateText
 }
 
 
-
+#if QT_DEPRECATED_SINCE(5, 15)
 /*!
     Creates a new QSGTexture object from an existing OpenGL texture \a id and \a size.
 
@@ -4274,24 +4801,132 @@ QSGTexture *QQuickWindow::createTextureFromImage(const QImage &image, CreateText
     \note This function only has an effect when using the default OpenGL scene graph
     adaptation.
 
+    \note This function has no effect when running on the RHI graphics
+    abstraction. Use createTextureFromNativeObject() instead.
+
+    \obsolete
+
     \sa sceneGraphInitialized(), QSGTexture
  */
 QSGTexture *QQuickWindow::createTextureFromId(uint id, const QSize &size, CreateTextureOptions options) const
 {
 #if QT_CONFIG(opengl)
-    if (openglContext()) {
-        QSGPlainTexture *texture = new QSGPlainTexture();
-        texture->setTextureId(id);
-        texture->setHasAlphaChannel(options & TextureHasAlphaChannel);
-        texture->setOwnsTexture(options & TextureOwnsGLTexture);
-        texture->setTextureSize(size);
-        return texture;
+    Q_D(const QQuickWindow);
+    if (!d->rhi) {
+        if (openglContext()) {
+            QSGPlainTexture *texture = new QSGPlainTexture();
+            texture->setTextureId(id);
+            texture->setHasAlphaChannel(options & TextureHasAlphaChannel);
+            texture->setOwnsTexture(options & TextureOwnsGLTexture);
+            texture->setTextureSize(size);
+            return texture;
+        }
+    } else {
+        qWarning("createTextureFromId() must not be called when running on the RHI. "
+                 "Use createTextureFromNativeObject() instead.");
     }
 #else
     Q_UNUSED(id)
     Q_UNUSED(size)
     Q_UNUSED(options)
 #endif
+    return nullptr;
+}
+#endif
+
+/*!
+    \enum QQuickWindow::NativeObjectType
+    \since 5.14
+
+    Specifies the type of the native object passed to functions such as
+    createTextureFromNativeObject().
+
+    \value NativeObjectTexture The native object is a 2D texture (OpenGL,
+    Direct3D 11, Metal) or image (Vulkan).
+ */
+
+/*!
+    Creates a new QSGTexture object from an existing native object.
+
+    The native object is wrapped, but not owned, by the resulting QSGTexture.
+    The caller of the function is responsible for deleting the returned
+    QSGTexture, but that will not destroy the underlying native object.
+
+    \a type specifies the type of the object. In practice the type is
+    NativeObjectTexture, indicating that the native object is a texture or
+    image of the underlying graphics API. Other types may be introduced in the
+    future.
+
+    This function is currently suitable for 2D RGBA textures only.
+
+    Unlike createTextureFromId(), this function supports both direct OpenGL
+    usage and the RHI abstracted rendering path.
+
+    \warning This function will return null if the scenegraph has not yet been
+    initialized.
+
+    Use \a options to customize the texture attributes. Only the
+    TextureHasAlphaChannel and TextureHasMipmaps are taken into account here.
+
+    \warning Unlike createTextureFromId(), this function never takes ownership
+    of the native object, and the TextureOwnsGLTexture flag is ignored.
+
+    \a size specifies the size in pixels.
+
+    \a nativeObjectPtr is a pointer to the native object handle. With OpenGL,
+    the native handle is a GLuint value, so \a nativeObjectPtr is then a
+    pointer to a GLuint. With Vulkan, the native handle is a VkImage, so \a
+    nativeObjectPtr is a pointer to a VkImage. With Direct3D 11 and Metal \a
+    nativeObjectPtr is a pointer to a ID3D11Texture2D or MTLTexture pointer.
+
+    \note Pay attention to the fact that \a nativeObjectPtr is always a pointer
+    to the native texture handle type, even if the native type itself is a
+    pointer.
+
+    \a nativeLayout is only used for APIs like Vulkan. When applicable, it must
+    specify the current image layout, such as, a VkImageLayout value.
+
+    \sa sceneGraphInitialized(), QSGTexture, QSGTexture::nativeTexture()
+
+    \since 5.14
+ */
+QSGTexture *QQuickWindow::createTextureFromNativeObject(NativeObjectType type,
+                                                        const void *nativeObjectPtr,
+                                                        int nativeLayout,
+                                                        const QSize &size,
+                                                        CreateTextureOptions options) const
+{
+    if (type != NativeObjectTexture) {
+        qWarning("createTextureFromNativeObject: only textures are supported");
+        return nullptr;
+    }
+
+#if QT_CONFIG(opengl) /* || QT_CONFIG(vulkan) || defined(Q_OS_WIN) || defined(Q_OS_DARWIN) */
+    Q_D(const QQuickWindow);
+    if (d->rhi) {
+        QSGPlainTexture *texture = new QSGPlainTexture;
+        texture->setTextureFromNativeObject(d->rhi, type, nativeObjectPtr, nativeLayout,
+                                            size, options.testFlag(TextureHasMipmaps));
+        texture->setHasAlphaChannel(options & TextureHasAlphaChannel);
+        // note that the QRhiTexture does not (and cannot) own the native object
+        texture->setOwnsTexture(true); // texture meaning the QRhiTexture here, not the native object
+        texture->setTextureSize(size);
+        return texture;
+    } else if (openglContext()) {
+        QSGPlainTexture *texture = new QSGPlainTexture;
+        texture->setTextureId(*reinterpret_cast<const uint *>(nativeObjectPtr));
+        texture->setHasAlphaChannel(options & TextureHasAlphaChannel);
+        texture->setOwnsTexture(options & TextureOwnsGLTexture);
+        texture->setTextureSize(size);
+        return texture;
+    }
+#else
+    Q_UNUSED(nativeObjectPtr);
+    Q_UNUSED(nativeLayout);
+    Q_UNUSED(size);
+    Q_UNUSED(options);
+#endif
+
     return nullptr;
 }
 
@@ -4382,14 +5017,22 @@ void QQuickWindow::setDefaultAlphaBuffer(bool useAlpha)
     \note This function only has an effect when using the default OpenGL scene graph
     adaptation.
 
-    \sa QQuickWindow::beforeRendering()
+    \note This function will only reset the OpenGL context in relation to what has been changed
+    internally as part of the OpenGL scene graph. It does not reset anything that has been changed
+    externally such as direct OpenGL calls done inside the application code if those same calls are
+    not used internally.
+
+    \note This function has no effect when running on the RHI graphics
+    abstraction and the underlying RHI backend is not OpenGL.
+
+    \sa QQuickWindow::beforeRendering(), beginExternalCommands(), endExternalCommands()
  */
 void QQuickWindow::resetOpenGLState()
 {
+    Q_D(QQuickWindow);
+
     if (!openglContext())
         return;
-
-    Q_D(QQuickWindow);
 
     QOpenGLContext *ctx = openglContext();
     QOpenGLFunctions *gl = ctx->functions();
@@ -4437,6 +5080,138 @@ void QQuickWindow::resetOpenGLState()
     QOpenGLFramebufferObject::bindDefault();
 }
 #endif
+
+/*!
+    \struct QQuickWindow::GraphicsStateInfo
+    \inmodule QtQuick
+    \since 5.14
+
+    \brief Describes some of the RHI's graphics state at the point of a
+    \l{QQuickWindow::beginExternalCommands()}{beginExternalCommands()} call.
+ */
+
+/*!
+    \return a reference to a GraphicsStateInfo struct describing some of the
+    RHI's internal state, in particular, the double or tripple buffering status
+    of the backend (such as, the Vulkan or Metal integrations). This is
+    relevant when the underlying graphics APIs is Vulkan or Metal, and the
+    external rendering code wishes to perform double or tripple buffering of
+    its own often-changing resources, such as, uniform buffers, in order to
+    avoid stalling the pipeline.
+ */
+const QQuickWindow::GraphicsStateInfo &QQuickWindow::graphicsStateInfo()
+{
+    Q_D(QQuickWindow);
+    if (d->rhi) {
+        d->rhiStateInfo.currentFrameSlot = d->rhi->currentFrameSlot();
+        d->rhiStateInfo.framesInFlight = d->rhi->resourceLimit(QRhi::FramesInFlight);
+    }
+    return d->rhiStateInfo;
+}
+
+/*!
+    When mixing raw graphics (OpenGL, Vulkan, Metal, etc.) commands with scene
+    graph rendering, it is necessary to call this function before recording
+    commands to the command buffer used by the scene graph to render its main
+    render pass. This is to avoid clobbering state.
+
+    In practice this function is often called from a slot connected to the
+    beforeRenderPassRecording() or afterRenderPassRecording() signals.
+
+    The function does not need to be called when recording commands to the
+    application's own command buffer (such as, a VkCommandBuffer or
+    MTLCommandBuffer + MTLRenderCommandEncoder created and managed by the
+    application, not retrieved from the scene graph). With graphics APIs where
+    no native command buffer concept is exposed (OpenGL, Direct 3D 11),
+    beginExternalCommands() and endExternalCommands() together provide a
+    replacement for resetOpenGLState().
+
+    Calling this function and endExternalCommands() is not necessary within the
+    \l{QSGRenderNode::render()}{render()} implementation of a QSGRenderNode
+    because the scene graph performs the necessary steps implicitly for render
+    nodes.
+
+    Native graphics objects (such as, graphics device, command buffer or
+    encoder) are accessible via QSGRendererInterface::getResource().
+
+    \warning Watch out for the fact that
+    QSGRendererInterface::CommandListResource may return a different object
+    between beginExternalCommands() - endExternalCommands(). This can happen
+    when the underlying implementation provides a dedicated secondary command
+    buffer for recording external graphics commands within a render pass.
+    Therefore, always query CommandListResource after calling this function. Do
+    not attempt to reuse an object from an earlier query.
+
+    \note This function has no effect when the scene graph is using OpenGL
+    directly and the RHI graphics abstraction layer is not in use. Refer to
+    resetOpenGLState() in that case.
+
+    \note When the scenegraph is using the RHI graphics abstraction layer with
+    the OpenGL backend underneath, pay attention to the fact that the OpenGL
+    state in the context can have arbitrary settings, and this function does not
+    perform any resetting of the state back to defaults. Call
+    resetOpenGLState() if that is seen necessary.
+
+    \sa endExternalCommands(), resetOpenGLState()
+
+    \since 5.14
+ */
+void QQuickWindow::beginExternalCommands()
+{
+#if QT_CONFIG(opengl) /* || QT_CONFIG(vulkan) || defined(Q_OS_WIN) || defined(Q_OS_DARWIN) */
+    Q_D(QQuickWindow);
+    if (d->rhi && d->context && d->context->isValid()) {
+        QSGDefaultRenderContext *rc = static_cast<QSGDefaultRenderContext *>(d->context);
+        QRhiCommandBuffer *cb = rc->currentFrameCommandBuffer();
+        if (cb)
+            cb->beginExternal();
+    }
+#endif
+}
+
+/*!
+    When mixing raw graphics (OpenGL, Vulkan, Metal, etc.) commands with scene
+    graph rendering, it is necessary to call this function after recording
+    commands to the command buffer used by the scene graph to render its main
+    render pass. This is to avoid clobbering state.
+
+    In practice this function is often called from a slot connected to the
+    beforeRenderPassRecording() or afterRenderPassRecording() signals.
+
+    The function does not need to be called when recording commands to the
+    application's own command buffer (such as, a VkCommandBuffer or
+    MTLCommandBuffer + MTLRenderCommandEncoder created and managed by the
+    application, not retrieved from the scene graph). With graphics APIs where
+    no native command buffer concept is exposed (OpenGL, Direct 3D 11),
+    beginExternalCommands() and endExternalCommands() together provide a
+    replacement for resetOpenGLState().
+
+    Calling this function and beginExternalCommands() is not necessary within the
+    \l{QSGRenderNode::render()}{render()} implementation of a QSGRenderNode
+    because the scene graph performs the necessary steps implicitly for render
+    nodes.
+
+    \note This function has no effect when the scene graph is using OpenGL
+    directly and the RHI graphics abstraction layer is not in use. Refer to
+    resetOpenGLState() in that case.
+
+    \sa beginExternalCommands()
+
+    \since 5.14
+ */
+void QQuickWindow::endExternalCommands()
+{
+#if QT_CONFIG(opengl) /* || QT_CONFIG(vulkan) || defined(Q_OS_WIN) || defined(Q_OS_DARWIN) */
+    Q_D(QQuickWindow);
+    if (d->rhi && d->context && d->context->isValid()) {
+        QSGDefaultRenderContext *rc = static_cast<QSGDefaultRenderContext *>(d->context);
+        QRhiCommandBuffer *cb = rc->currentFrameCommandBuffer();
+        if (cb)
+            cb->endExternal();
+    }
+#endif
+}
+
 /*!
     \qmlproperty string Window::title
 
@@ -5022,6 +5797,10 @@ void QQuickWindow::setSceneGraphBackend(QSGRendererInterface::GraphicsApi api)
     default:
         break;
     }
+#if QT_CONFIG(opengl) /* || QT_CONFIG(vulkan) || defined(Q_OS_WIN) || defined(Q_OS_DARWIN) */
+    if (QSGRendererInterface::isApiRhiBased(api))
+        QSGRhiSupport::configure(api);
+#endif
 }
 
 /*!

@@ -59,7 +59,7 @@ class Q_AUTOTEST_EXPORT QQuickPinch : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(QQuickItem *target READ target WRITE setTarget RESET resetTarget)
+    Q_PROPERTY(QQuickItem *target READ target WRITE setTarget RESET resetTarget NOTIFY targetChanged)
     Q_PROPERTY(qreal minimumScale READ minimumScale WRITE setMinimumScale NOTIFY minimumScaleChanged)
     Q_PROPERTY(qreal maximumScale READ maximumScale WRITE setMaximumScale NOTIFY maximumScaleChanged)
     Q_PROPERTY(qreal minimumRotation READ minimumRotation WRITE setMinimumRotation NOTIFY minimumRotationChanged)
@@ -70,6 +70,7 @@ class Q_AUTOTEST_EXPORT QQuickPinch : public QObject
     Q_PROPERTY(qreal minimumY READ ymin WRITE setYmin NOTIFY minimumYChanged)
     Q_PROPERTY(qreal maximumY READ ymax WRITE setYmax NOTIFY maximumYChanged)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
+    QML_NAMED_ELEMENT(Pinch)
 
 public:
     QQuickPinch();
@@ -210,6 +211,7 @@ class Q_AUTOTEST_EXPORT QQuickPinchEvent : public QObject
     Q_PROPERTY(QPointF startPoint2 READ startPoint2)
     Q_PROPERTY(int pointCount READ pointCount)
     Q_PROPERTY(bool accepted READ accepted WRITE setAccepted)
+    QML_ANONYMOUS
 
 public:
     QQuickPinchEvent(QPointF c, qreal s, qreal a, qreal r)
@@ -268,6 +270,7 @@ class Q_AUTOTEST_EXPORT QQuickPinchArea : public QQuickItem
 
     Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled NOTIFY enabledChanged)
     Q_PROPERTY(QQuickPinch *pinch READ pinch CONSTANT)
+    QML_NAMED_ELEMENT(PinchArea)
 
 public:
     QQuickPinchArea(QQuickItem *parent=nullptr);
@@ -283,7 +286,7 @@ Q_SIGNALS:
     void pinchStarted(QQuickPinchEvent *pinch);
     void pinchUpdated(QQuickPinchEvent *pinch);
     void pinchFinished(QQuickPinchEvent *pinch);
-    Q_REVISION(1) void smartZoom(QQuickPinchEvent *pinch);
+    Q_REVISION(5) void smartZoom(QQuickPinchEvent *pinch);
 
 protected:
     bool childMouseEventFilter(QQuickItem *i, QEvent *e) override;

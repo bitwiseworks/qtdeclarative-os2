@@ -15,7 +15,10 @@ RESOURCES += \
     data/Enums.qml \
     data/componentInItem.qml \
     data/jsmoduleimport.qml \
-    data/script.mjs
+    data/script.mjs \
+    data/module.mjs \
+    data/utils.mjs \
+    data/parameterAdjustment.qml
 
 workerscripts_test.files = \
     data/worker.js \
@@ -25,11 +28,12 @@ workerscripts_test.prefix = /workerscripts
 RESOURCES += \
     workerscripts_test \
     trickypaths.qrc \
-    retain.qrc
+    data/retain.qrc \
+    data/skip.qrc
 
 # QTBUG-46375
 !win32: RESOURCES += trickypaths_umlaut.qrc
 
-QTQUICK_COMPILER_RETAINED_RESOURCES += retain.qrc
+QTQUICK_COMPILER_SKIPPED_RESOURCES += data/skip.qrc
 
 QT += core-private qml-private testlib

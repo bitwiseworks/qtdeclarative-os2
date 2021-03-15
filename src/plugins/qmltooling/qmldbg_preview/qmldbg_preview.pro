@@ -4,6 +4,7 @@ TARGET = qmldbg_preview
 os2:TARGET_SHORT = qmldpv
 
 SOURCES += \
+    $$PWD/qqmldebugtranslationservice.cpp \
     $$PWD/qqmlpreviewblacklist.cpp \
     $$PWD/qqmlpreviewfileengine.cpp \
     $$PWD/qqmlpreviewfileloader.cpp \
@@ -13,6 +14,7 @@ SOURCES += \
     $$PWD/qqmlpreviewservicefactory.cpp
 
 HEADERS += \
+    $$PWD/qqmldebugtranslationservice.h \
     $$PWD/qqmlpreviewblacklist.h \
     $$PWD/qqmlpreviewfileengine.h \
     $$PWD/qqmlpreviewfileloader.h \

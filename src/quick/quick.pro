@@ -1,9 +1,12 @@
 TARGET = QtQuick
 os2:TARGET_SHORT = QtQ
 
-QT = core-private gui-private qml-private
+QT = core-private gui-private qml-private qmlmodels-private
 qtConfig(qml-network): \
     QT_PRIVATE += network
+
+TRACEPOINT_PROVIDER = $$PWD/qtquick.tracepoints
+CONFIG += qt_tracepoints
 
 DEFINES   += QT_NO_URL_CAST_FROM_STRING QT_NO_INTEGER_EVENT_COORDINATES
 msvc:DEFINES *= _CRT_SECURE_NO_WARNINGS
@@ -19,13 +22,10 @@ exists("qqml_enable_gcov") {
 
 QMAKE_DOCS = $$PWD/doc/qtquick.qdocconf
 
-ANDROID_LIB_DEPENDENCIES = \
-    lib/libQt5QuickParticles.so
 MODULE_PLUGIN_TYPES += \
     scenegraph
 ANDROID_BUNDLED_FILES += \
-    qml \
-    lib/libQt5QuickParticles.so
+    qml
 
 include(util/util.pri)
 include(scenegraph/scenegraph.pri)
@@ -48,3 +48,9 @@ SOURCES += qtquick2.cpp
 INCLUDEPATH += $$PWD
 
 load(qt_module)
+
+QMLTYPES_FILENAME = plugins.qmltypes
+QMLTYPES_INSTALL_DIR = $$[QT_INSTALL_QML]/QtQuick.2
+QML_IMPORT_NAME = QtQuick
+IMPORT_VERSION = 2.$$QT_MINOR_VERSION
+CONFIG += qmltypes install_qmltypes install_metatypes

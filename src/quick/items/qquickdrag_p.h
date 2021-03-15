@@ -53,14 +53,14 @@
 
 #include <QtQuick/qquickitem.h>
 
-#include <private/qv8engine_p.h>
+#include <private/qintrusivelist_p.h>
 #include <private/qqmlguard_p.h>
 
 #include <QtCore/qmimedata.h>
 #include <QtCore/qstringlist.h>
 #include <QtCore/qurl.h>
 
-#if QT_CONFIG(draganddrop)
+QT_REQUIRE_CONFIG(quick_draganddrop);
 
 QT_BEGIN_NAMESPACE
 
@@ -172,6 +172,10 @@ class Q_AUTOTEST_EXPORT QQuickDrag : public QObject
     Q_PROPERTY(qreal threshold READ threshold WRITE setThreshold NOTIFY thresholdChanged RESET resetThreshold)
     //### consider drag and drop
 
+    QML_NAMED_ELEMENT(Drag)
+    QML_UNCREATABLE("Drag is only available via attached properties.")
+    QML_ATTACHED(QQuickDragAttached)
+
 public:
     QQuickDrag(QObject *parent=nullptr);
     ~QQuickDrag();
@@ -254,6 +258,9 @@ class QQuickDragAttached : public QObject
     Q_PROPERTY(Qt::DropActions supportedActions READ supportedActions WRITE setSupportedActions NOTIFY supportedActionsChanged)
     Q_PROPERTY(Qt::DropAction proposedAction READ proposedAction WRITE setProposedAction NOTIFY proposedActionChanged)
     Q_PROPERTY(QQuickDrag::DragType dragType READ dragType WRITE setDragType NOTIFY dragTypeChanged)
+
+    QML_ANONYMOUS
+
 public:
     QQuickDragAttached(QObject *parent);
     ~QQuickDragAttached();
@@ -316,8 +323,5 @@ Q_SIGNALS:
 QT_END_NAMESPACE
 
 QML_DECLARE_TYPE(QQuickDrag)
-QML_DECLARE_TYPEINFO(QQuickDrag, QML_HAS_ATTACHED_PROPERTIES)
-
-#endif // draganddrop
 
 #endif

@@ -58,7 +58,7 @@
 #include <wtf/Vector.h>
 #include <assembler/MacroAssembler.h>
 
-#ifdef V4_ENABLE_JIT
+QT_REQUIRE_CONFIG(qml_jit);
 
 QT_BEGIN_NAMESPACE
 
@@ -449,7 +449,7 @@ public:
     // r6 is used by MacroAssemblerARMv7
     static const RegisterID JSStackFrameRegister     = JSC::ARMRegisters::r8;
     static const RegisterID CppStackFrameRegister    = JSC::ARMRegisters::r10;
-#if CPU(ARM_THUMB2) || defined(V4_BOOTSTRAP)
+#if CPU(ARM_THUMB2)
     static const RegisterID FramePointerRegister     = JSC::ARMRegisters::r7;
     static const RegisterID EngineRegister           = JSC::ARMRegisters::r11;
 #else // Thumbs down
@@ -619,11 +619,14 @@ public:
         for (Jump j : catchyJumps)
             j.link(this);
 
+        // We don't need to check for isInterrupted here because if that is set,
+        // then the first checkException() in any exception handler will find another "exception"
+        // and jump out of the exception handler.
         loadPtr(exceptionHandlerAddress(), ScratchRegister);
         Jump exitFunction = branchPtr(Equal, ScratchRegister, TrustedImmPtr(0));
+        loadUndefined();
         jump(ScratchRegister);
         exitFunction.link(this);
-        loadUndefined();
 
         if (functionExit.isSet())
             jump(functionExit);
@@ -633,6 +636,8 @@ public:
 
     void checkException()
     {
+        // This actually reads 4 bytes, starting at hasException.
+        // Therefore, it also reads the isInterrupted flag, and triggers an exception on that.
         addCatchyJump(
                     branch32(NotEqual,
                              Address(EngineRegister, offsetof(EngineBase, hasException)),
@@ -701,9 +706,9 @@ public:
     void passCppFrameAsArg(int arg);
     void passInt32AsArg(int value, int arg);
     void passPointerAsArg(void *ptr, int arg);
-    void callRuntime(const char *functionName, const void *funcPtr);
-    void callRuntimeUnchecked(const char *functionName, const void *funcPtr);
-    void tailCallRuntime(const char *functionName, const void *funcPtr);
+    void callRuntime(const void *funcPtr, const char *functionName = nullptr);
+    void callRuntimeUnchecked(const void *funcPtr, const char *functionName = nullptr);
+    void tailCallRuntime(const void *funcPtr, const char *functionName = nullptr);
     void setTailCallArg(RegisterID src, int arg);
     Address jsAlloca(int slotCount);
     void storeInt32AsValue(int srcInt, Address destAddr);
@@ -734,7 +739,5 @@ private:
 } // QV4 namespace
 
 QT_END_NAMESPACE
-
-#endif // V4_ENABLE_JIT
 
 #endif // QV4PLATFORMASSEMBLER_P_H

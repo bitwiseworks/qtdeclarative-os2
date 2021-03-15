@@ -45,7 +45,6 @@
 #include <QtQuick/private/qquickevents_p_p.h>
 #include <private/qquickitemchangelistener_p.h>
 #include <private/qquickpixmapcache_p.h>
-#include <private/qv8engine_p.h>
 #include <private/qv4scopedvalue_p.h>
 #include <QtCore/qmimedata.h>
 #include <QtQml/qqmlinfo.h>
@@ -53,7 +52,6 @@
 #include <QtGui/qstylehints.h>
 #include <QtGui/qguiapplication.h>
 
-#if QT_CONFIG(draganddrop)
 #include <qpa/qplatformdrag.h>
 #include <QtGui/qdrag.h>
 
@@ -62,6 +60,8 @@ QT_BEGIN_NAMESPACE
 class QQuickDragAttachedPrivate : public QObjectPrivate, public QQuickItemChangeListener
 {
     Q_DECLARE_PUBLIC(QQuickDragAttached)
+    QML_ANONYMOUS
+
 public:
     static QQuickDragAttachedPrivate *get(QQuickDragAttached *attached) {
         return static_cast<QQuickDragAttachedPrivate *>(QObjectPrivate::get(attached)); }
@@ -251,6 +251,8 @@ bool QQuickDragAttached::event(QEvent *event)
         d->eventQueued = false;
         if (d->dragRestarted) {
             d->deliverLeaveEvent();
+            if (!d->mimeData)
+                d->mimeData = new QQuickDragMimeData;
             d->deliverEnterEvent();
 
             if (d->target != d->dragGrabber.target()) {
@@ -442,7 +444,7 @@ void QQuickDragAttached::setImageSource(const QUrl &url)
         if (url.isEmpty()) {
             d->pixmapLoader.clear();
         } else {
-            d->pixmapLoader.load(qmlEngine(this), url);
+            d->pixmapLoader.load(qmlEngine(parent()), url);
         }
 
         Q_EMIT imageSourceChanged();
@@ -744,8 +746,6 @@ void QQuickDragAttached::cancel()
 
     This signal is emitted when a drag is started with the \l startDrag() method
     or when it is started automatically using the \l dragType property.
-
-    The corresponding handler is \c onDragStarted.
  */
 
 /*!
@@ -754,7 +754,9 @@ void QQuickDragAttached::cancel()
     This signal is emitted when a drag finishes and the drag was started with the
     \l startDrag() method or started automatically using the \l dragType property.
 
-    The corresponding handler is \c onDragFinished.
+    \a dropAction holds the action accepted by the target item.
+
+    \sa drop()
  */
 
 Qt::DropAction QQuickDragAttachedPrivate::startDrag(Qt::DropActions supportedActions)
@@ -997,5 +999,3 @@ QQuickDragAttached *QQuickDrag::qmlAttachedProperties(QObject *obj)
 QT_END_NAMESPACE
 
 #include "moc_qquickdrag_p.cpp"
-
-#endif // draganddrop

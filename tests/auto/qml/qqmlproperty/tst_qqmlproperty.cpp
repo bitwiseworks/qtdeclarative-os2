@@ -25,6 +25,8 @@
 ** $QT_END_LICENSE$
 **
 ****************************************************************************/
+
+#include "interfaces.h"
 #include <qtest.h>
 #include <QtQml/qqmlengine.h>
 #include <QtQml/qqmlcomponent.h>
@@ -35,8 +37,13 @@
 #include <private/qqmlboundsignal_p.h>
 #include <QtCore/qfileinfo.h>
 #include <QtCore/qdir.h>
+#if QT_CONFIG(regularexpression)
+#include <QtCore/qregularexpression.h>
+#endif
 #include <QtCore/private/qobject_p.h>
 #include "../../shared/util.h"
+#include "qobject.h"
+#include <QtQml/QQmlPropertyMap>
 
 #include <QDebug>
 class MyQmlObject : public QObject
@@ -144,11 +151,19 @@ private slots:
     void deeplyNestedObject();
     void readOnlyDynamicProperties();
     void aliasToIdWithMatchingQmlFileNameOnCaseInsensitiveFileSystem();
+    void nullPropertyBinding();
+    void interfaceBinding();
 
     void floatToStringPrecision_data();
     void floatToStringPrecision();
 
     void copy();
+
+    void bindingToAlias();
+
+    void nestedQQmlPropertyMap();
+
+    void underscorePropertyChangeHandler();
 private:
     QQmlEngine engine;
 };
@@ -1213,10 +1228,10 @@ void tst_qqmlproperty::read()
     }
     {
         QQmlComponent component(&engine, testFileUrl("readSynthesizedObject.qml"));
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QQmlProperty p(object, "test", &engine);
+        QQmlProperty p(object.data(), "test", &engine);
 
         QCOMPARE(p.propertyTypeCategory(), QQmlProperty::Object);
         QVERIFY(p.propertyType() != QMetaType::QObjectStar);
@@ -1228,10 +1243,10 @@ void tst_qqmlproperty::read()
     }
     {   // static
         QQmlComponent component(&engine, testFileUrl("readSynthesizedObject.qml"));
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QVariant v = QQmlProperty::read(object, "test", &engine);
+        QVariant v = QQmlProperty::read(object.data(), "test", &engine);
         QCOMPARE(v.userType(), int(QMetaType::QObjectStar));
         QCOMPARE(qvariant_cast<QObject *>(v)->property("a").toInt(), 10);
         QCOMPARE(qvariant_cast<QObject *>(v)->property("b").toInt(), 19);
@@ -1241,41 +1256,38 @@ void tst_qqmlproperty::read()
     {
         QQmlComponent component(&engine);
         component.setData("import Test 1.0\nMyContainer { }", QUrl());
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QQmlProperty p(object, "MyContainer.foo", qmlContext(object));
+        QQmlProperty p(object.data(), "MyContainer.foo", qmlContext(object.data()));
         QCOMPARE(p.read(), QVariant(13));
-        delete object;
     }
     {
         QQmlComponent component(&engine);
         component.setData("import Test 1.0\nMyContainer { MyContainer.foo: 10 }", QUrl());
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QQmlProperty p(object, "MyContainer.foo", qmlContext(object));
+        QQmlProperty p(object.data(), "MyContainer.foo", qmlContext(object.data()));
         QCOMPARE(p.read(), QVariant(10));
-        delete object;
     }
     {
         QQmlComponent component(&engine);
         component.setData("import Test 1.0 as Foo\nFoo.MyContainer { Foo.MyContainer.foo: 10 }", QUrl());
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QQmlProperty p(object, "Foo.MyContainer.foo", qmlContext(object));
+        QQmlProperty p(object.data(), "Foo.MyContainer.foo", qmlContext(object.data()));
         QCOMPARE(p.read(), QVariant(10));
-        delete object;
     }
     {   // static
         QQmlComponent component(&engine);
         component.setData("import Test 1.0 as Foo\nFoo.MyContainer { Foo.MyContainer.foo: 10 }", QUrl());
-        QObject *object = component.create();
+        QScopedPointer<QObject> object(component.create());
         QVERIFY(object != nullptr);
 
-        QCOMPARE(QQmlProperty::read(object, "Foo.MyContainer.foo", qmlContext(object)), QVariant(10));
-        delete object;
+        QCOMPARE(QQmlProperty::read(object.data(), "Foo.MyContainer.foo",
+                                    qmlContext(object.data())), QVariant(10));
     }
 }
 
@@ -1436,11 +1448,12 @@ void tst_qqmlproperty::write()
         { // QChar -> QString
             QQmlComponent component(&engine);
             component.setData("import Test 1.0\nPropertyObject { stringProperty: constQChar }", QUrl());
-            PropertyObject *obj = qobject_cast<PropertyObject*>(component.create());
-            QVERIFY(obj != nullptr);
-            if (obj) {
-                QQmlProperty stringProperty(obj, "stringProperty");
-                QCOMPARE(stringProperty.read(), QVariant(QString(obj->constQChar())));
+            QScopedPointer<QObject> object(component.create());
+            PropertyObject *propertyObject = qobject_cast<PropertyObject*>(object.data());
+            QVERIFY(propertyObject != nullptr);
+            if (propertyObject) {
+                QQmlProperty stringProperty(propertyObject, "stringProperty");
+                QCOMPARE(stringProperty.read(), QVariant(QString(propertyObject->constQChar())));
             }
         }
 
@@ -1617,37 +1630,40 @@ void tst_qqmlproperty::writeObjectToList()
 {
     QQmlComponent containerComponent(&engine);
     containerComponent.setData("import Test 1.0\nMyContainer { children: MyQmlObject {} }", QUrl());
-    MyContainer *container = qobject_cast<MyContainer*>(containerComponent.create());
+    QScopedPointer<QObject> object(containerComponent.create());
+    MyContainer *container = qobject_cast<MyContainer*>(object.data());
     QVERIFY(container != nullptr);
     QQmlListReference list(container, "children");
     QCOMPARE(list.count(), 1);
 
-    MyQmlObject *object = new MyQmlObject;
+    QScopedPointer<MyQmlObject> childObject(new MyQmlObject);
     QQmlProperty prop(container, "children");
-    prop.write(qVariantFromValue(object));
+    prop.write(QVariant::fromValue(childObject.data()));
     QCOMPARE(list.count(), 1);
-    QCOMPARE(list.at(0), qobject_cast<QObject*>(object));
+    QCOMPARE(list.at(0), qobject_cast<QObject*>(childObject.data()));
 }
 
 void tst_qqmlproperty::writeListToList()
 {
     QQmlComponent containerComponent(&engine);
     containerComponent.setData("import Test 1.0\nMyContainer { children: MyQmlObject {} }", QUrl());
-    MyContainer *container = qobject_cast<MyContainer*>(containerComponent.create());
+    QScopedPointer<QObject> object(containerComponent.create());
+    MyContainer *container = qobject_cast<MyContainer*>(object.data());
     QVERIFY(container != nullptr);
     QQmlListReference list(container, "children");
     QCOMPARE(list.count(), 1);
 
     QList<QObject*> objList;
-    objList << new MyQmlObject() << new MyQmlObject() << new MyQmlObject() << new MyQmlObject();
+    objList << new MyQmlObject(this) << new MyQmlObject(this)
+            << new MyQmlObject(this) << new MyQmlObject(this);
     QQmlProperty prop(container, "children");
-    prop.write(qVariantFromValue(objList));
+    prop.write(QVariant::fromValue(objList));
     QCOMPARE(list.count(), 4);
 
     //XXX need to try this with read/write prop (for read-only it correctly doesn't write)
     /*QList<MyQmlObject*> typedObjList;
     typedObjList << new MyQmlObject();
-    prop.write(qVariantFromValue(&typedObjList));
+    prop.write(QVariant::fromValue(&typedObjList));
     QCOMPARE(container->children()->size(), 1);*/
 }
 
@@ -1817,10 +1833,11 @@ void tst_qqmlproperty::crashOnValueProperty()
     QQmlComponent component(engine);
 
     component.setData("import Test 1.0\nPropertyObject { wrectProperty.x: 10 }", QUrl());
-    PropertyObject *obj = qobject_cast<PropertyObject*>(component.create());
-    QVERIFY(obj != nullptr);
+    QScopedPointer<QObject> object(component.create());
+    PropertyObject *propertyObject = qobject_cast<PropertyObject*>(object.data());
+    QVERIFY(propertyObject != nullptr);
 
-    QQmlProperty p(obj, "wrectProperty.x", qmlContext(obj));
+    QQmlProperty p(propertyObject, "wrectProperty.x", qmlContext(propertyObject));
     QCOMPARE(p.name(), QString("wrectProperty.x"));
 
     QCOMPARE(p.read(), QVariant(10));
@@ -1988,11 +2005,9 @@ void tst_qqmlproperty::assignEmptyVariantMap()
     QCOMPARE(o.variantMap().count(), 1);
     QCOMPARE(o.variantMap().isEmpty(), false);
 
-    QQmlContext context(&engine);
-    context.setContextProperty("o", &o);
 
     QQmlComponent component(&engine, testFileUrl("assignEmptyVariantMap.qml"));
-    QObject *obj = component.create(&context);
+    QObject *obj = component.createWithInitialProperties({{"o", QVariant::fromValue(&o)}});
     QVERIFY(obj);
 
     QCOMPARE(o.variantMap().count(), 0);
@@ -2014,9 +2029,13 @@ void tst_qqmlproperty::warnOnInvalidBinding()
     expectedWarning = testUrl.toString() + QString::fromLatin1(":7:5: Unable to assign QQuickText to QQuickRectangle");
     QTest::ignoreMessage(QtWarningMsg, expectedWarning.toLatin1().constData());
 
+#if QT_CONFIG(regularexpression)
     // V8 error message for invalid binding to anchor
-    expectedWarning = testUrl.toString() + QString::fromLatin1(":14:9: Unable to assign QQuickItem_QML_8 to QQuickAnchorLine");
-    QTest::ignoreMessage(QtWarningMsg, expectedWarning.toLatin1().constData());
+    const QRegularExpression warning(
+                "^" + testUrl.toString()
+                + ":14:9: Unable to assign QQuickItem_QML_\\d+ to QQuickAnchorLine$");
+    QTest::ignoreMessage(QtWarningMsg, warning);
+#endif
 
     QQmlComponent component(&engine, testUrl);
     QObject *obj = component.create();
@@ -2057,6 +2076,46 @@ void tst_qqmlproperty::aliasToIdWithMatchingQmlFileNameOnCaseInsensitiveFileSyst
 
     QQmlProperty property(root.data(), "testType.objectName", QQmlEngine::contextForObject(root.data()));
     QVERIFY(property.isValid());
+}
+
+// QTBUG-77027
+void tst_qqmlproperty::nullPropertyBinding()
+{
+    const QUrl url = testFileUrl("nullPropertyBinding.qml");
+    QQmlEngine engine;
+    QQmlComponent component(&engine, url);
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY(root);
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "undefined");
+    QMetaObject::invokeMethod(root.get(), "tog");
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "defined");
+    QMetaObject::invokeMethod(root.get(), "tog");
+    QTest::ignoreMessage(QtMsgType::QtInfoMsg, "undefined");
+    QMetaObject::invokeMethod(root.get(), "tog");
+}
+
+void tst_qqmlproperty::interfaceBinding()
+{
+    qmlRegisterInterface<Interface>("Interface");
+    qmlRegisterType<A>("io.qt.bugreports", 1, 0, "A");
+    qmlRegisterType<B>("io.qt.bugreports", 1, 0, "B");
+    qmlRegisterType<C>("io.qt.bugreports", 1, 0, "C");
+    qmlRegisterType<InterfaceConsumer>("io.qt.bugreports", 1, 0, "InterfaceConsumer");
+
+    const QVector<QUrl> urls = {
+        testFileUrl("interfaceBinding.qml"),
+        testFileUrl("interfaceBinding2.qml")
+    };
+
+    for (const QUrl &url : urls) {
+        QQmlEngine engine;
+        QQmlComponent component(&engine, url);
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY(root);
+        QCOMPARE(root->findChild<QObject*>("a1")->property("testValue").toInt(), 42);
+        QCOMPARE(root->findChild<QObject*>("a2")->property("testValue").toInt(), 43);
+        QCOMPARE(root->findChild<QObject*>("a3")->property("testValue").toInt(), 44);
+    }
 }
 
 void tst_qqmlproperty::floatToStringPrecision_data()
@@ -2104,6 +2163,51 @@ void tst_qqmlproperty::initTestCase()
     qmlRegisterType<MyQmlObject>("Test",1,0,"MyQmlObject");
     qmlRegisterType<PropertyObject>("Test",1,0,"PropertyObject");
     qmlRegisterType<MyContainer>("Test",1,0,"MyContainer");
+}
+
+// QTBUG-60908
+void tst_qqmlproperty::bindingToAlias()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("aliasToBinding.qml"));
+    QScopedPointer<QObject> o(component.create());
+    QVERIFY(!o.isNull());
+}
+
+void tst_qqmlproperty::nestedQQmlPropertyMap()
+{
+    QQmlPropertyMap mainPropertyMap;
+    QQmlPropertyMap nestedPropertyMap;
+    QQmlPropertyMap deeplyNestedPropertyMap;
+
+    mainPropertyMap.insert("nesting1", QVariant::fromValue(&nestedPropertyMap));
+    nestedPropertyMap.insert("value", 42);
+    nestedPropertyMap.insert("nesting2", QVariant::fromValue(&deeplyNestedPropertyMap));
+    deeplyNestedPropertyMap.insert("value", "success");
+
+    QQmlProperty value{&mainPropertyMap, "nesting1.value"};
+    QCOMPARE(value.read().toInt(), 42);
+
+    QQmlProperty success{&mainPropertyMap, "nesting1.nesting2.value"};
+    QCOMPARE(success.read().toString(), QLatin1String("success"));
+}
+
+void tst_qqmlproperty::underscorePropertyChangeHandler()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+        import QtQuick 2.12
+
+        Item {
+            property int __withUnderScore
+        }
+    )", QUrl::fromLocalFile("."));
+    QScopedPointer<QObject> root { component.create() };
+    QVERIFY(root);
+    QQmlProperty changeHandler(root.get(), "on__WithUnderScoreChanged");
+    QVERIFY(changeHandler.isValid());
+    QVERIFY(changeHandler.isSignalProperty());
 }
 
 QTEST_MAIN(tst_qqmlproperty)

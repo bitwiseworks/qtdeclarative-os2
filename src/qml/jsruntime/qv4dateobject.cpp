@@ -52,15 +52,30 @@
 
 #include <time.h>
 
-#include <private/qqmljsengine_p.h>
-
 #include <wtf/MathExtras.h>
 
-#if defined(Q_OS_LINUX) && QT_CONFIG(timezone)
+#if QT_CONFIG(timezone) && !defined(Q_OS_WIN)
 /*
   See QTBUG-56899.  Although we don't (yet) have a proper way to reset the
   system zone, the code below, that uses QTimeZone::systemTimeZone(), works
-  adequately on Linux, when the TZ environment variable is changed.
+  adequately on Linux.
+
+  QTimeZone::systemTimeZone() will automatically produce an updated value on
+  non-android Linux systems when the TZ environment variable or the relevant
+  files in /etc are changed. On other platforms it won't, and the information
+  produced here may be incorrect after changes to the system time zone.
+
+  We accept this defect for now because the localtime_r approach will
+  consistently produce incorrect results for some time zones, not only when
+  the system time zone changes. This is a worse problem, see also QTBUG-84474.
+
+  On windows we have a better implementation of getLocalTZA that hopefully
+  updates on time zone changes. However, we currently use the worse
+  implementation of DaylightSavingTA (returning either an hour or 0).
+
+  QTimeZone::systemTimeZone() on Linux is also slower than other approaches
+  because it has to poll the relevant files (if TZ is not set). See
+  QTBUG-75585 for an explanation and possible workarounds.
  */
 #define USE_QTZ_SYSTEM_ZONE
 #endif
@@ -296,13 +311,28 @@ static double MakeDay(double year, double month, double day)
     if (month < 0)
         month += 12.0;
 
-    double d = DayFromYear(year);
-    bool leap = InLeapYear(d*msPerDay);
+    /* Quoting the spec:
 
-    d += DayFromMonth(month, leap);
-    d += day - 1;
+       Find a value t such that YearFromTime(t) is ym and MonthFromTime(t) is mn
+       and DateFromTime(t) is 1; but if this is not possible (because some
+       argument is out of range), return NaN.
+    */
+    double first = DayFromYear(year);
+    /* Beware floating-point glitches: don't test the first millisecond of a
+     * year, month or day when we could test a moment firmly in the interior of
+     * the interval. A rounding glitch might give the first millisecond to the
+     * preceding interval.
+     */
+    bool leap = InLeapYear((first + 60) * msPerDay);
 
-    return d;
+    first += DayFromMonth(month, leap);
+    const double t = first * msPerDay + msPerDay / 2; // Noon on the first of the month
+    Q_ASSERT(Day(t) == first);
+    if (YearFromTime(t) != year || MonthFromTime(t) != month || DateFromTime(t) != 1) {
+        qWarning("Apparently out-of-range date %.0f-%02.0f-%02.0f", year, month, day);
+        return qt_qnan();
+    }
+    return first + day - 1;
 }
 
 static inline double MakeDate(double day, double time)
@@ -603,8 +633,7 @@ static inline double ParseString(const QString &s, double localTZA)
             QStringLiteral("d MMMM, yyyy hh:mm:ss"),
         };
 
-        for (uint i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
-            const QString &format(formats[i]);
+        for (const QString &format : formats) {
             dt = format.indexOf(QLatin1String("hh:mm")) < 0
                 ? QDateTime(QDate::fromString(s, format),
                             QTime(0, 0, 0), Qt::UTC)
@@ -670,17 +699,17 @@ static inline QString ToTimeString(double t)
 
 static inline QString ToLocaleString(double t)
 {
-    return ToDateTime(t, Qt::LocalTime).toString(Qt::DefaultLocaleShortDate);
+    return QLocale().toString(ToDateTime(t, Qt::LocalTime), QLocale::ShortFormat);
 }
 
 static inline QString ToLocaleDateString(double t)
 {
-    return ToDateTime(t, Qt::LocalTime).date().toString(Qt::DefaultLocaleShortDate);
+    return QLocale().toString(ToDateTime(t, Qt::LocalTime).date(), QLocale::ShortFormat);
 }
 
 static inline QString ToLocaleTimeString(double t)
 {
-    return ToDateTime(t, Qt::LocalTime).time().toString(Qt::DefaultLocaleShortDate);
+    return QLocale().toString(ToDateTime(t, Qt::LocalTime).time(), QLocale::ShortFormat);
 }
 
 static double getLocalTZA()
@@ -731,14 +760,16 @@ void Heap::DateObject::init(const QTime &time)
      * time from it, which shall (via toQDateTime(), below) discard the date
      * part.  We need a date for which time-zone data is likely to be sane (so
      * MakeDay(0, 0, 0) was a bad choice; 2 BC, December 31st is before
-     * time-zones were standardized), with no transition nearby in date.  We
-     * ignore DST transitions before 1970, but even then zone transitions did
-     * happen.  Some do happen at new year, others on DST transitions in spring
-     * and autumn; so pick the three hundredth anniversary of the birth of
-     * Giovanni Domenico Cassini (1625-06-08), whose work first let us
-     * synchronize clocks tolerably accurately at distant locations.
+     * time-zones were standardized), with no transition nearby in date.
+     * QDateTime ignores DST transitions before 1970, but even then zone
+     * transitions did happen; and DaylightSavingTA() will include DST, at odds
+     * with QDateTime.  So pick a date since 1970 and prefer one when no zone
+     * was in DST.  One such interval (according to the Olson database, at
+     * least) was 1971 March 15th to April 17th.  Since converting a time to a
+     * date-time without specifying a date is foolish, let's use April Fools'
+     * day.
      */
-    static const double d = MakeDay(1925, 5, 8);
+    static const double d = MakeDay(1971, 3, 1);
     double t = MakeTime(time.hour(), time.minute(), time.second(), time.msec());
     date = TimeClip(UTC(MakeDate(d, t), internalClass->engine->localTZA));
 }
@@ -1547,7 +1578,7 @@ ReturnedValue DatePrototype::method_toJSON(const FunctionObject *b, const Value 
     if (!toIso)
         return v4->throwTypeError();
 
-    return toIso->call(O, nullptr, 0);
+    return checkedResult(v4, toIso->call(O, nullptr, 0));
 }
 
 ReturnedValue DatePrototype::method_symbolToPrimitive(const FunctionObject *f, const Value *thisObject, const Value *argv, int argc)

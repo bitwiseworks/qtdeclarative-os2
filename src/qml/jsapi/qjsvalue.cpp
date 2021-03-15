@@ -51,7 +51,6 @@
 #include "qv4variantobject_p.h"
 #include "qv4regexpobject_p.h"
 #include "qv4errorobject_p.h"
-#include "private/qv8engine_p.h"
 #include <private/qv4mm_p.h>
 #include <private/qv4jscall_p.h>
 #include <private/qv4qobjectwrapper_p.h>
@@ -315,7 +314,7 @@ bool QJSValue::isBool() const
     if (val)
         return val->isBoolean();
     QVariant *variant = QJSValuePrivate::getVariant(this);
-    return variant && variant->type() == QVariant::Bool;
+    return variant && variant->userType() == QMetaType::Bool;
 }
 
 /*!
@@ -474,7 +473,7 @@ bool QJSValue::isObject() const
 }
 
 /*!
-  Returns true if this QJSValue can be called a function, otherwise
+  Returns true if this QJSValue is a function, otherwise
   returns false.
 
   \sa call()
@@ -521,9 +520,9 @@ QString QJSValue::toString() const
     if (!val) {
         QVariant *variant = QJSValuePrivate::getVariant(this);
         Q_ASSERT(variant);
-        if (variant->type() == QVariant::Map)
+        if (variant->userType() == QMetaType::QVariantMap)
             return QStringLiteral("[object Object]");
-        else if (variant->type() == QVariant::List) {
+        else if (variant->userType() == QMetaType::QVariantList) {
             const QVariantList list = variant->toList();
             QString result;
             for (int i = 0; i < list.count(); ++i) {
@@ -559,7 +558,7 @@ double QJSValue::toNumber() const
         QVariant *variant = QJSValuePrivate::getVariant(this);
         Q_ASSERT(variant);
 
-        if (variant->type() == QVariant::String)
+        if (variant->userType() == QMetaType::QString)
             return RuntimeHelpers::stringToNumber(variant->toString());
         else if (variant->canConvert<double>())
             return variant->value<double>();
@@ -770,6 +769,8 @@ QJSValue QJSValue::call(const QJSValueList &args)
     ScopedValue result(scope, f->call(jsCallData));
     if (engine->hasException)
         result = engine->catchException();
+    if (engine->isInterrupted.loadAcquire())
+        result = engine->newErrorObject(QStringLiteral("Interrupted"));
 
     return QJSValue(engine, result->asReturnedValue());
 }
@@ -826,6 +827,8 @@ QJSValue QJSValue::callWithInstance(const QJSValue &instance, const QJSValueList
     ScopedValue result(scope, f->call(jsCallData));
     if (engine->hasException)
         result = engine->catchException();
+    if (engine->isInterrupted.loadAcquire())
+        result = engine->newErrorObject(QStringLiteral("Interrupted"));
 
     return QJSValue(engine, result->asReturnedValue());
 }
@@ -874,6 +877,8 @@ QJSValue QJSValue::callAsConstructor(const QJSValueList &args)
     ScopedValue result(scope, f->callAsConstructor(jsCallData));
     if (engine->hasException)
         result = engine->catchException();
+    if (engine->isInterrupted.loadAcquire())
+        result = engine->newErrorObject(QStringLiteral("Interrupted"));
 
     return QJSValue(engine, result->asReturnedValue());
 }
@@ -1035,14 +1040,14 @@ bool QJSValue::equals(const QJSValue& other) const
         Q_ASSERT(variant);
         if (!ov)
             return *variant == *QJSValuePrivate::getVariant(&other);
-        if (variant->type() == QVariant::Map || variant->type() == QVariant::List)
+        if (variant->userType() == QMetaType::QVariantMap || variant->userType() == QMetaType::QVariantList)
             return false;
         return js_equal(variant->toString(), *ov);
         }
     if (!ov)
         return other.equals(*this);
 
-    return Runtime::method_compareEqual(*v, *ov);
+    return Runtime::CompareEqual::call(*v, *ov);
 }
 
 /*!
@@ -1078,7 +1083,7 @@ bool QJSValue::strictlyEquals(const QJSValue& other) const
         Q_ASSERT(variant);
         if (!ov)
             return *variant == *QJSValuePrivate::getVariant(&other);
-        if (variant->type() == QVariant::Map || variant->type() == QVariant::List)
+        if (variant->userType() == QMetaType::QVariantMap || variant->userType() == QMetaType::QVariantList)
             return false;
         if (String *s = ov->stringValue())
             return variant->toString() == s->toQString();

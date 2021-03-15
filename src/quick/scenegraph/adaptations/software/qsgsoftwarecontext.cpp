@@ -99,8 +99,9 @@ QSGInternalRectangleNode *QSGSoftwareContext::createInternalRectangleNode()
     return new QSGSoftwareInternalRectangleNode();
 }
 
-QSGInternalImageNode *QSGSoftwareContext::createInternalImageNode()
+QSGInternalImageNode *QSGSoftwareContext::createInternalImageNode(QSGRenderContext *renderContext)
 {
+    Q_UNUSED(renderContext);
     return new QSGSoftwareInternalImageNode();
 }
 
@@ -205,12 +206,12 @@ QSGRendererInterface::ShaderType QSGSoftwareContext::shaderType() const
 
 QSGRendererInterface::ShaderCompilationTypes QSGSoftwareContext::shaderCompilationType() const
 {
-    return nullptr;
+    return {};
 }
 
 QSGRendererInterface::ShaderSourceTypes QSGSoftwareContext::shaderSourceType() const
 {
-    return nullptr;
+    return {};
 }
 
 void *QSGSoftwareContext::getResource(QQuickWindow *window, Resource resource) const

@@ -50,6 +50,7 @@
 #include <private/qqmlglobal_p.h>
 #include <private/qv4qobjectwrapper_p.h>
 #include <private/qqmlbuiltinfunctions_p.h>
+#include <private/qqmlsourcecoordinate_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -72,8 +73,8 @@ bool QQmlDelayedError::addError(QQmlEnginePrivate *e)
 void QQmlDelayedError::setErrorLocation(const QQmlSourceLocation &sourceLocation)
 {
     m_error.setUrl(QUrl(sourceLocation.sourceFile));
-    m_error.setLine(sourceLocation.line);
-    m_error.setColumn(sourceLocation.column);
+    m_error.setLine(qmlConvertSourceCoordinate<quint16, int>(sourceLocation.line));
+    m_error.setColumn(qmlConvertSourceCoordinate<quint16, int>(sourceLocation.column));
 }
 
 void QQmlDelayedError::setErrorDescription(const QString &description)
@@ -208,7 +209,10 @@ QV4::ReturnedValue QQmlJavaScriptExpression::evaluate(QV4::CallData *callData, b
     }
 
     Q_ASSERT(m_qmlScope.valueRef());
-    QV4::ReturnedValue res = v4Function->call(&callData->thisObject, callData->args, callData->argc(), static_cast<QV4::ExecutionContext *>(m_qmlScope.valueRef()));
+    QV4::ReturnedValue res = v4Function->call(
+            &(callData->thisObject.asValue<QV4::Value>()),
+            callData->argValues<QV4::Value>(), callData->argc(),
+            static_cast<QV4::ExecutionContext *>(m_qmlScope.valueRef()));
     QV4::Scope scope(v4);
     QV4::ScopedValue result(scope, res);
 
@@ -392,10 +396,10 @@ void QQmlJavaScriptExpression::setupFunction(QV4::ExecutionContext *qmlContext, 
         return;
     m_qmlScope.set(qmlContext->engine(), *qmlContext);
     m_v4Function = f;
-    setCompilationUnit(m_v4Function->compilationUnit);
+    setCompilationUnit(m_v4Function->executableCompilationUnit());
 }
 
-void QQmlJavaScriptExpression::setCompilationUnit(const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit)
+void QQmlJavaScriptExpression::setCompilationUnit(const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit)
 {
     m_compilationUnit = compilationUnit;
 }

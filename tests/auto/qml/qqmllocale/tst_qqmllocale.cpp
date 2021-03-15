@@ -32,6 +32,9 @@
 #include <QtQml/qqmlcomponent.h>
 #include <QtQml/qqmlcontext.h>
 #include <QtCore/QDateTime>
+#include <QtCore/qscopeguard.h>
+#include <QtCore/qscopedpointer.h>
+#include <QtCore/qtimezone.h>
 #include <qcolor.h>
 #include "../../shared/util.h"
 
@@ -100,6 +103,7 @@ private slots:
     void numberFromLocaleString_data();
     void numberFromLocaleString();
     void numberConstToLocaleString();
+    void numberOptions();
 
     void stringLocaleCompare_data();
     void stringLocaleCompare();
@@ -446,7 +450,7 @@ void tst_qqmllocale::firstDayOfWeek()
         Q_ARG(QVariant, QVariant(locale)));
 
     QVariant val = obj->property("firstDayOfWeek");
-    QCOMPARE(val.type(), QVariant::Int);
+    QCOMPARE(val.userType(), QMetaType::Int);
 
     int day = int(QLocale(locale).firstDayOfWeek());
     if (day == 7) // JS Date days in range 0(Sunday) to 6(Saturday)
@@ -1155,6 +1159,35 @@ void tst_qqmllocale::numberConstToLocaleString()
     QCOMPARE(obj->property("const2").toString(), l.toString(1234., 'f', 2));
 }
 
+void tst_qqmllocale::numberOptions()
+{
+    QQmlEngine engine;
+    QQmlComponent comp(&engine);
+    comp.setData(R"(
+        import QtQml 2.15
+        QtObject {
+            id: root
+            property string formatted
+            property bool caughtException: false
+            Component.onCompleted: () => {
+                const myLocale = Qt.locale("de_DE")
+                myLocale.numberOptions = Locale.OmitGroupSeparator | Locale.RejectTrailingZeroesAfterDot
+                root.formatted = Number(10000).toLocaleString(myLocale, 'f', 4)
+                try {
+                    Number.fromLocaleString(myLocale, "1,10");
+                } catch (e) {console.warn(e); root.caughtException = true}
+            }
+        }
+    )", QUrl("testdata"));
+    QTest::ignoreMessage(QtMsgType::QtWarningMsg, "Error: Locale: Number.fromLocaleString(): Invalid format");
+    QScopedPointer<QObject> root {comp.create()};
+    qDebug() << comp.errorString();
+    QVERIFY(root);
+    QCOMPARE(root->property("formatted").toString(), QLatin1String("10000,0000"));
+    QCOMPARE(root->property("caughtException").toBool(), true);
+
+}
+
 void tst_qqmllocale::stringLocaleCompare_data()
 {
     QTest::addColumn<QString>("string1");
@@ -1214,10 +1247,9 @@ private:
 
 void tst_qqmllocale::localeAsCppProperty()
 {
-    QQmlComponent component(&engine);
     qmlRegisterType<Calendar>("Test", 1, 0, "Calendar");
-    component.setData("import QtQml 2.2\nimport Test 1.0\nCalendar { locale: Qt.locale('en_GB'); property var testLocale }", QUrl());
-    QVERIFY(!component.isError());
+    QQmlComponent component(&engine, testFileUrl("localeAsCppProperty.qml"));
+    QVERIFY2(!component.isError(), qPrintable(component.errorString()));
     QTRY_VERIFY(component.isReady());
 
     Calendar *item = qobject_cast<Calendar*>(component.create());
@@ -1266,10 +1298,24 @@ static void setTimeZone(const QByteArray &tz)
 
 void tst_qqmllocale::timeZoneUpdated()
 {
+    // Note: This test may not reliably hit the QEXPECT_FAIL clauses below if the initial
+    //       system time zone is equivalent to either Australia/Brisbane or Asia/Kalkota.
+
+    // Initialize the system time zone, so that we actually _change_ something below.
+    QVERIFY2(QTimeZone::systemTimeZone().isValid(),
+             "You know, Toto, I do believe we're not in Kansas any more.");
+
     QByteArray original(qgetenv("TZ"));
 
     // Set the timezone to Brisbane time, AEST-10:00
     setTimeZone(QByteArray("Australia/Brisbane"));
+
+    QScopedPointer<QObject> obj;
+    auto cleanup = qScopeGuard([&original, &obj] {
+        // Restore to original time zone
+        setTimeZone(original);
+        QMetaObject::invokeMethod(obj.data(), "resetTimeZone");
+    });
 
     DateFormatter formatter;
 
@@ -1277,8 +1323,13 @@ void tst_qqmllocale::timeZoneUpdated()
     e.rootContext()->setContextObject(&formatter);
 
     QQmlComponent c(&e, testFileUrl("timeZoneUpdated.qml"));
-    QScopedPointer<QObject> obj(c.create());
+    QVERIFY2(!c.isError(), qPrintable(c.errorString()));
+    obj.reset(c.create());
     QVERIFY(obj);
+
+#if !defined(Q_OS_WIN) && QT_CONFIG(timezone) && (!defined(Q_OS_LINUX) || defined(Q_OS_ANDROID))
+    QEXPECT_FAIL("", "Date.timeZoneUpdated() only works on non-Android Linux with QT_CONFIG(timezone).", Continue);
+#endif
     QVERIFY(obj->property("success").toBool());
 
     // Change to Indian time, IST-05:30
@@ -1286,10 +1337,9 @@ void tst_qqmllocale::timeZoneUpdated()
 
     QMetaObject::invokeMethod(obj.data(), "check");
 
-    // Reset to original time
-    setTimeZone(original);
-    QMetaObject::invokeMethod(obj.data(), "resetTimeZone");
-
+#if !defined(Q_OS_WIN) && QT_CONFIG(timezone) && (!defined(Q_OS_LINUX) || defined(Q_OS_ANDROID))
+    QEXPECT_FAIL("", "Date.timeZoneUpdated() only works on non-Android Linux with QT_CONFIG(timezone).", Continue);
+#endif
     QVERIFY(obj->property("success").toBool());
 }
 #endif

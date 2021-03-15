@@ -53,6 +53,7 @@
 
 #include "qquickimplicitsizeitem_p.h"
 #include <private/qtquickglobal_p.h>
+#include <QtGui/qcolorspace.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -68,8 +69,24 @@ class Q_QUICK_PRIVATE_EXPORT QQuickImageBase : public QQuickImplicitSizeItem
     Q_PROPERTY(bool cache READ cache WRITE setCache NOTIFY cacheChanged)
     Q_PROPERTY(QSize sourceSize READ sourceSize WRITE setSourceSize RESET resetSourceSize NOTIFY sourceSizeChanged)
     Q_PROPERTY(bool mirror READ mirror WRITE setMirror NOTIFY mirrorChanged)
+    Q_PROPERTY(int currentFrame READ currentFrame WRITE setCurrentFrame NOTIFY currentFrameChanged REVISION 14)
+    Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged REVISION 14)
+    Q_PROPERTY(QColorSpace colorSpace READ colorSpace WRITE setColorSpace NOTIFY colorSpaceChanged REVISION 15)
+
+    QML_NAMED_ELEMENT(ImageBase);
+    QML_ADDED_IN_MINOR_VERSION(14)
+    QML_UNCREATABLE("ImageBase is an abstract base class.")
 
 public:
+    enum LoadPixmapOption {
+        NoOption            = 0x0000,
+        HandleDPR           = 0x0001,
+        UseProviderOptions  = 0x0002
+    };
+
+    Q_DECLARE_FLAGS(LoadPixmapOptions, LoadPixmapOption)
+    Q_FLAG(LoadPixmapOptions)
+
     QQuickImageBase(QQuickItem *parent=nullptr);
     ~QQuickImageBase();
     enum Status { Null, Ready, Loading, Error };
@@ -92,11 +109,23 @@ public:
     QSize sourceSize() const;
     void resetSourceSize();
 
+    QRectF sourceClipRect() const;
+    void setSourceClipRect(const QRectF &r);
+    void resetSourceClipRect();
+
     virtual void setMirror(bool mirror);
     bool mirror() const;
 
+    virtual void setCurrentFrame(int frame);
+    virtual int currentFrame() const;
+
+    virtual int frameCount() const;
+
     virtual void setAutoTransform(bool transform);
     bool autoTransform() const;
+
+    QColorSpace colorSpace() const;
+    virtual void setColorSpace(const QColorSpace &colorSpace);
 
     static void resolve2xLocalFile(const QUrl &url, qreal targetDevicePixelRatio, QUrl *sourceUrl, qreal *sourceDevicePixelRatio);
 
@@ -112,8 +141,14 @@ Q_SIGNALS:
     void asynchronousChanged();
     void cacheChanged();
     void mirrorChanged();
+    Q_REVISION(14) void currentFrameChanged();
+    Q_REVISION(14) void frameCountChanged();
+    Q_REVISION(15) void sourceClipRectChanged();
+    Q_REVISION(15) void colorSpaceChanged();
 
 protected:
+    void loadEmptyUrl();
+    void loadPixmap(const QUrl &url, LoadPixmapOptions loadOptions = NoOption);
     virtual void load();
     void componentComplete() override;
     virtual void pixmapChange();

@@ -59,7 +59,7 @@ contains(DEFINES, WTF_USE_UDIS86=1) {
     udis86.output = udis86_itab.h
     udis86.input = ITAB
     udis86.CONFIG += no_link
-    udis86.commands = python $$PWD/disassembler/udis86/itab.py ${QMAKE_FILE_IN}
+    udis86.commands = $$QMAKE_PYTHON $$PWD/disassembler/udis86/itab.py ${QMAKE_FILE_IN}
     QMAKE_EXTRA_COMPILERS += udis86
 
     udis86_tab_cfile.target = $$OUT_PWD/udis86_itab.c
@@ -78,7 +78,6 @@ SOURCES += $$PWD/disassembler/ARM64Disassembler.cpp
 SOURCES += $$PWD/disassembler/ARM64/A64DOpcode.cpp
 HEADERS += $$PWD/disassembler/ARM64/A64DOpcode.h
 
-!qmldevtools_build {
 SOURCES += $$PWD/yarr/YarrCanonicalizeUCS2.cpp \
            $$PWD/yarr/YarrCanonicalizeUnicode.cpp \
            $$PWD/yarr/YarrInterpreter.cpp \
@@ -95,7 +94,6 @@ HEADERS += $$PWD/yarr/Yarr.h \
            $$PWD/yarr/YarrPattern.h \
            $$PWD/yarr/YarrSyntaxChecker.h \
            $$PWD/yarr/YarrUnicodeProperties.h
-}
 
 #
 # Generate RegExpJitTables.h
@@ -114,7 +112,7 @@ retgen.output = $$GENERATEDDIR/RegExpJitTables.h
 retgen.script = $$PWD/yarr/create_regex_tables
 retgen.input = retgen.script
 retgen.CONFIG += no_link
-retgen.commands = python $$retgen.script > ${QMAKE_FILE_OUT}
+retgen.commands = $$QMAKE_PYTHON $$retgen.script > ${QMAKE_FILE_OUT}
 QMAKE_EXTRA_COMPILERS += retgen
 
 # Taken from WebKit/Tools/qmake/mkspecs/features/unix/default_post.prf
@@ -128,9 +126,4 @@ QMAKE_EXTRA_COMPILERS += retgen
             QMAKE_CXXFLAGS += -Wno-c++0x-compat
         }
     }
-}
-
-linux {
-    requires(qtConfig(dlopen))
-    QMAKE_USE_PRIVATE += libdl
 }
