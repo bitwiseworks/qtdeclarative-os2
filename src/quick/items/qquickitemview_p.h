@@ -81,8 +81,8 @@ class Q_QUICK_PRIVATE_EXPORT QQuickItemView : public QQuickFlickable
     Q_PROPERTY(bool keyNavigationWraps READ isWrapEnabled WRITE setWrapEnabled NOTIFY keyNavigationWrapsChanged)
     Q_PROPERTY(bool keyNavigationEnabled READ isKeyNavigationEnabled WRITE setKeyNavigationEnabled NOTIFY keyNavigationEnabledChanged REVISION 7)
     Q_PROPERTY(int cacheBuffer READ cacheBuffer WRITE setCacheBuffer NOTIFY cacheBufferChanged)
-    Q_PROPERTY(int displayMarginBeginning READ displayMarginBeginning WRITE setDisplayMarginBeginning NOTIFY displayMarginBeginningChanged REVISION 2)
-    Q_PROPERTY(int displayMarginEnd READ displayMarginEnd WRITE setDisplayMarginEnd NOTIFY displayMarginEndChanged REVISION 2)
+    Q_PROPERTY(int displayMarginBeginning READ displayMarginBeginning WRITE setDisplayMarginBeginning NOTIFY displayMarginBeginningChanged REVISION 3)
+    Q_PROPERTY(int displayMarginEnd READ displayMarginEnd WRITE setDisplayMarginEnd NOTIFY displayMarginEndChanged REVISION 3)
 
     Q_PROPERTY(Qt::LayoutDirection layoutDirection READ layoutDirection WRITE setLayoutDirection NOTIFY layoutDirectionChanged)
     Q_PROPERTY(Qt::LayoutDirection effectiveLayoutDirection READ effectiveLayoutDirection NOTIFY effectiveLayoutDirectionChanged)
@@ -109,6 +109,12 @@ class Q_QUICK_PRIVATE_EXPORT QQuickItemView : public QQuickFlickable
     Q_PROPERTY(qreal preferredHighlightBegin READ preferredHighlightBegin WRITE setPreferredHighlightBegin NOTIFY preferredHighlightBeginChanged RESET resetPreferredHighlightBegin)
     Q_PROPERTY(qreal preferredHighlightEnd READ preferredHighlightEnd WRITE setPreferredHighlightEnd NOTIFY preferredHighlightEndChanged RESET resetPreferredHighlightEnd)
     Q_PROPERTY(int highlightMoveDuration READ highlightMoveDuration WRITE setHighlightMoveDuration NOTIFY highlightMoveDurationChanged)
+
+    Q_PROPERTY(bool reuseItems READ reuseItems WRITE setReuseItems NOTIFY reuseItemsChanged REVISION 15)
+
+    QML_NAMED_ELEMENT(ItemView)
+    QML_UNCREATABLE("ItemView is an abstract base class.")
+    QML_ADDED_IN_MINOR_VERSION(1)
 
 public:
     // this holds all layout enum values so they can be referred to by other enums
@@ -222,6 +228,9 @@ public:
     int highlightMoveDuration() const;
     virtual void setHighlightMoveDuration(int);
 
+    bool reuseItems() const;
+    void setReuseItems(bool reuse);
+
     enum PositionMode { Beginning, Center, End, Visible, Contain, SnapPosition };
     Q_ENUM(PositionMode)
 
@@ -277,6 +286,8 @@ Q_SIGNALS:
     void preferredHighlightEndChanged();
     void highlightMoveDurationChanged();
 
+    Q_REVISION(15) void reuseItemsChanged();
+
 protected:
     void updatePolish() override;
     void componentComplete() override;
@@ -292,6 +303,8 @@ protected Q_SLOTS:
     virtual void initItem(int index, QObject *item);
     void modelUpdated(const QQmlChangeSet &changeSet, bool reset);
     void destroyingItem(QObject *item);
+    Q_REVISION(15) void onItemPooled(int modelIndex, QObject *object);
+    Q_REVISION(15) void onItemReused(int modelIndex, QObject *object);
     void animStopped();
     void trackedPositionChanged();
 
@@ -394,6 +407,9 @@ Q_SIGNALS:
     void sectionChanged();
     void prevSectionChanged();
     void nextSectionChanged();
+
+    void pooled();
+    void reused();
 
 public:
     QPointer<QQuickItemView> m_view;

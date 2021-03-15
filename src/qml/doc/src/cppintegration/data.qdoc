@@ -197,6 +197,25 @@ type or method parameter, the value can be created as a JavaScript array or
 object in QML, and is automatically converted to a QVariantList or QVariantMap
 when it is passed to C++.
 
+Mind that QVariantList and QVariantMap properties of C++ types are stored as
+values and cannot be changed in place by QML code. You can only replace the
+whole map or list, but not manipulate its contents. The following code does
+not work if the property \c l is a QVariantList:
+
+\code
+MyListExposingItem {
+   l: [1, 2, 3]
+   Component.onCompleted: l[0] = 10
+}
+\endcode
+
+The following code does work:
+\code
+MyListExposingItem {
+   l: [1, 2, 3]
+   Component.onCompleted: l = [10, 2, 3]
+}
+\endcode
 
 \section2 QDateTime to JavaScript Date
 
@@ -308,6 +327,11 @@ In both the Q_PROPERTY and return from Q_INVOKABLE cases, the elements
 of a std::vector are copied. This copying may be an expensive operation,
 so std::vector should be used judiciously.
 
+You can also create a list-like data structure by constructing a QJSValue using
+QJSEngine::newArray(). Such a JavaScript array does not need any conversion
+when passing it between QML and C++. See \l{QJSValue#Working With Arrays} for
+details on how to manipulate JavaScript arrays from C++.
+
 Other sequence types are not supported transparently, and instead an
 instance of any other sequence type will be passed between QML and C++ as an
 opaque QVariantList.
@@ -380,6 +404,14 @@ properties:
 
  Q_DECLARE_METATYPE(Actor)
 \endcode
+
+The usual pattern is to use a gadget class as the type of a property, or to
+emit a gadget as a signal argument. In such cases, the gadget instance is
+passed by value between C++ and QML (because it's a value type). If QML code
+changes a property of a gadget property, the entire gadget is re-created and
+passed back to the C++ property setter. In Qt 5, gadget types cannot be
+instantiated by direct declaration in QML. In contrast, a QObject instance can
+be declared; and QObject instances are always passed by pointer from C++ to QML.
 
 \section1 Enumeration Types
 

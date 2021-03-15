@@ -75,19 +75,31 @@ class QQuickGraphicsInfo : public QObject
     Q_PROPERTY(OpenGLContextProfile profile READ profile NOTIFY profileChanged FINAL)
     Q_PROPERTY(RenderableType renderableType READ renderableType NOTIFY renderableTypeChanged FINAL)
 
+    QML_NAMED_ELEMENT(GraphicsInfo)
+    QML_ADDED_IN_MINOR_VERSION(8)
+    QML_UNCREATABLE("GraphicsInfo is only available via attached properties.")
+    QML_ATTACHED(QQuickGraphicsInfo)
+
 public:
     enum GraphicsApi {
         Unknown = QSGRendererInterface::Unknown,
         Software = QSGRendererInterface::Software,
         OpenGL = QSGRendererInterface::OpenGL,
-        Direct3D12 = QSGRendererInterface::Direct3D12
+        Direct3D12 = QSGRendererInterface::Direct3D12,
+        OpenVG = QSGRendererInterface::OpenVG,
+        OpenGLRhi = QSGRendererInterface::OpenGLRhi,
+        Direct3D11Rhi = QSGRendererInterface::Direct3D11Rhi,
+        VulkanRhi = QSGRendererInterface::VulkanRhi,
+        MetalRhi = QSGRendererInterface::MetalRhi,
+        NullRhi = QSGRendererInterface::NullRhi
     };
     Q_ENUM(GraphicsApi)
 
     enum ShaderType {
         UnknownShadingLanguage = QSGRendererInterface::UnknownShadingLanguage,
         GLSL = QSGRendererInterface::GLSL,
-        HLSL = QSGRendererInterface::HLSL
+        HLSL = QSGRendererInterface::HLSL,
+        RhiShader = QSGRendererInterface::RhiShader
     };
     Q_ENUM(ShaderType)
 
@@ -160,7 +172,5 @@ private:
 };
 
 QT_END_NAMESPACE
-
-QML_DECLARE_TYPEINFO(QQuickGraphicsInfo, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif // QQUICKGRAPHICSINFO_P_H

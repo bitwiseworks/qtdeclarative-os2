@@ -57,7 +57,6 @@
 #include <QtCore/qstringlist.h>
 #include <QtCore/qscopedpointer.h>
 #include <QtQuick/qquickitem.h>
-#include <QtQml/private/qv8engine_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -77,6 +76,7 @@ class Q_QUICK_TEST_EXPORT QuickTestResult : public QObject
     Q_PROPERTY(int skipCount READ skipCount)
     Q_PROPERTY(QStringList functionsToRun READ functionsToRun)
     Q_PROPERTY(QStringList tagsToRun READ tagsToRun)
+
 public:
     QuickTestResult(QObject *parent = nullptr);
     ~QuickTestResult() override;

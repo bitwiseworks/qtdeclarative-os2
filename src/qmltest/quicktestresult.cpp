@@ -62,7 +62,9 @@
 #include <QtCore/qdebug.h>
 #include <QtCore/QUrl>
 #include <QtCore/QDir>
+#if QT_CONFIG(regularexpression)
 #include <QtCore/qregularexpression.h>
+#endif
 #include <QtQuick/qquickwindow.h>
 #include <QtGui/qvector3d.h>
 #include <QtGui/qimagewriter.h>
@@ -478,7 +480,7 @@ static QString qtestFixUrl(const QUrl &location)
 void QuickTestResult::fail
     (const QString &message, const QUrl &location, int line)
 {
-    QTestResult::addFailure(message.toLatin1().constData(),
+    QTestResult::addFailure(message.toUtf8().constData(),
                             qtestFixUrl(location).toLatin1().constData(), line);
 }
 
@@ -491,15 +493,15 @@ bool QuickTestResult::verify
              qtestFixUrl(location).toLatin1().constData(), line);
     } else {
         return QTestResult::verify
-            (success, message.toLatin1().constData(), "",
+            (success, message.toUtf8().constData(), "",
              qtestFixUrl(location).toLatin1().constData(), line);
     }
 }
 
 bool QuickTestResult::fuzzyCompare(const QVariant &actual, const QVariant &expected, qreal delta)
 {
-    if (actual.type() == QVariant::Color || expected.type() == QVariant::Color) {
-        if (!actual.canConvert(QVariant::Color) || !expected.canConvert(QVariant::Color))
+    if (actual.userType() == QMetaType::QColor || expected.userType() == QMetaType::QColor) {
+        if (!actual.canConvert(QMetaType::QColor) || !expected.canConvert(QMetaType::QColor))
             return false;
 
         //fuzzy color comparison
@@ -554,20 +556,20 @@ void QuickTestResult::stringify(QQmlV4Function *args)
         && !value->as<QV4::ArrayObject>()) {
         QVariant v = scope.engine->toVariant(value, QMetaType::UnknownType);
         if (v.isValid()) {
-            switch (v.type()) {
-            case QVariant::Vector3D:
+            switch (v.userType()) {
+            case QMetaType::QVector3D:
             {
                 QVector3D v3d = v.value<QVector3D>();
                 result = QString::fromLatin1("Qt.vector3d(%1, %2, %3)").arg(v3d.x()).arg(v3d.y()).arg(v3d.z());
                 break;
             }
-            case QVariant::Url:
+            case QMetaType::QUrl:
             {
                 QUrl url = v.value<QUrl>();
                 result = QString::fromLatin1("Qt.url(%1)").arg(url.toString());
                 break;
             }
-            case QVariant::DateTime:
+            case QMetaType::QDateTime:
             {
                 QDateTime dt = v.value<QDateTime>();
                 result = dt.toString(Qt::ISODateWithMs);
@@ -599,7 +601,7 @@ bool QuickTestResult::compare
      const QUrl &location, int line)
 {
     return QTestResult::compare
-        (success, message.toLocal8Bit().constData(),
+        (success, message.toUtf8().constData(),
          QTest::toString(val1.toString().toLatin1().constData()),
          QTest::toString(val2.toString().toLatin1().constData()),
          "", "",
@@ -609,7 +611,7 @@ bool QuickTestResult::compare
 void QuickTestResult::skip
     (const QString &message, const QUrl &location, int line)
 {
-    QTestResult::addSkip(message.toLatin1().constData(),
+    QTestResult::addSkip(message.toUtf8().constData(),
                          qtestFixUrl(location).toLatin1().constData(), line);
     QTestResult::setSkipCurrentTest(true);
 }
@@ -628,26 +630,23 @@ bool QuickTestResult::expectFailContinue
 {
     return QTestResult::expectFail
         (tag.toLatin1().constData(),
-         QTest::toString(comment.toLatin1().constData()),
+         QTest::toString(comment.toUtf8().constData()),
          QTest::Continue, qtestFixUrl(location).toLatin1().constData(), line);
 }
 
 void QuickTestResult::warn(const QString &message, const QUrl &location, int line)
 {
-    QTestLog::warn(message.toLatin1().constData(), qtestFixUrl(location).toLatin1().constData(), line);
+    QTestLog::warn(message.toUtf8().constData(), qtestFixUrl(location).toLatin1().constData(), line);
 }
 
 void QuickTestResult::ignoreWarning(const QJSValue &message)
 {
     if (message.isRegExp()) {
-        // ### we should probably handle QRegularExpression conversion engine-side
-        QRegExp re = message.toVariant().toRegExp();
-        QRegularExpression::PatternOptions opts = re.caseSensitivity() ==
-            Qt::CaseInsensitive ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption;
-        QRegularExpression re2(re.pattern(), opts);
-        QTestLog::ignoreMessage(QtWarningMsg, re2);
+#if QT_CONFIG(regularexpression)
+        QTestLog::ignoreMessage(QtWarningMsg, message.toVariant().toRegularExpression());
+#endif
     } else {
-        QTestLog::ignoreMessage(QtWarningMsg, message.toString().toLatin1());
+        QTestLog::ignoreMessage(QtWarningMsg, message.toString().toUtf8());
     }
 }
 

@@ -49,18 +49,14 @@
 #include "qv4string_p.h"
 #include "qv4jscall_p.h"
 
-#include <private/qqmljsengine_p.h>
-#include <private/qqmljslexer_p.h>
-#include <private/qqmljsparser_p.h>
-#include <private/qqmljsast_p.h>
-#include <qv4codegen_p.h>
+#include <private/qv4codegen_p.h>
+#include <private/qv4alloca_p.h>
 #include "private/qlocale_tools_p.h"
 #include "private/qtools_p.h"
 
 #include <QtCore/QDebug>
 #include <QtCore/QString>
 #include <iostream>
-#include "qv4alloca_p.h"
 
 #include <wtf/MathExtras.h>
 
@@ -376,12 +372,12 @@ ReturnedValue EvalFunction::evalCall(const Value *, const Value *argv, int argc,
     if (function->isStrict() || isStrict) {
         ScopedFunctionObject e(scope, FunctionObject::createScriptFunction(ctx, function));
         ScopedValue thisObject(scope, directCall ? scope.engine->currentStackFrame->thisObject() : scope.engine->globalObject->asReturnedValue());
-        return e->call(thisObject, nullptr, 0);
+        return checkedResult(v4, e->call(thisObject, nullptr, 0));
     }
 
     ScopedValue thisObject(scope, scope.engine->currentStackFrame->thisObject());
 
-    return function->call(thisObject, nullptr, 0, ctx);
+    return checkedResult(v4, function->call(thisObject, nullptr, 0, ctx));
 }
 
 

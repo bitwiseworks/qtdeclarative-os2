@@ -76,14 +76,8 @@ QSGTexture *QQuickImageTextureProvider::texture() const {
 }
 
 QQuickImagePrivate::QQuickImagePrivate()
-    : fillMode(QQuickImage::Stretch)
-    , paintedWidth(0)
-    , paintedHeight(0)
-    , pixmapChanged(false)
+    : pixmapChanged(false)
     , mipmap(false)
-    , hAlign(QQuickImage::AlignHCenter)
-    , vAlign(QQuickImage::AlignVCenter)
-    , provider(nullptr)
 {
 }
 
@@ -433,10 +427,10 @@ qreal QQuickImage::paintedHeight() const
 /*!
     \qmlproperty QSize QtQuick::Image::sourceSize
 
-    This property holds the actual width and height of the loaded image.
+    This property holds the scaled width and height of the full-frame image.
 
     Unlike the \l {Item::}{width} and \l {Item::}{height} properties, which scale
-    the painting of the image, this property sets the actual number of pixels
+    the painting of the image, this property sets the maximum number of pixels
     stored for the loaded image so that large images do not use more
     memory than necessary. For example, this ensures the image in memory is no
     larger than 1024x1024 pixels, regardless of the Image's \l {Item::}{width} and
@@ -461,7 +455,7 @@ qreal QQuickImage::paintedHeight() const
     other dimension is set in proportion to preserve the source image's aspect ratio.
     (The \l fillMode is independent of this.)
 
-    If both the sourceSize.width and sourceSize.height are set the image will be scaled
+    If both the sourceSize.width and sourceSize.height are set, the image will be scaled
     down to fit within the specified size (unless PreserveAspectCrop or PreserveAspectFit
     are used, then it will be scaled to match the optimal size for cropping/fitting),
     maintaining the image's aspect ratio.  The actual
@@ -476,11 +470,59 @@ qreal QQuickImage::paintedHeight() const
     be no greater than this property specifies. For some formats (currently only JPEG),
     the whole image will never actually be loaded into memory.
 
+    If the \l sourceClipRect property is also set, \c sourceSize determines the scale,
+    but it will be clipped to the size of the clip rectangle.
+
     sourceSize can be cleared to the natural size of the image
     by setting sourceSize to \c undefined.
 
     \note \e {Changing this property dynamically causes the image source to be reloaded,
     potentially even from the network, if it is not in the disk cache.}
+*/
+
+/*!
+    \qmlproperty rect QtQuick::Image::sourceClipRect
+    \since 5.15
+
+    This property, if set, holds the rectangular region of the source image to
+    be loaded.
+
+    The \c sourceClipRect works together with the \l sourceSize property to
+    conserve system resources when only a portion of an image needs to be
+    loaded.
+
+    \code
+    Rectangle {
+        width: ...
+        height: ...
+
+        Image {
+           anchors.fill: parent
+           source: "reallyBigImage.svg"
+           sourceSize.width: 1024
+           sourceSize.height: 1024
+           sourceClipRect: Qt.rect(100, 100, 512, 512)
+        }
+    }
+    \endcode
+
+    In the above example, we conceptually scale the SVG graphic to 1024x1024
+    first, and then cut out a region of interest that is 512x512 pixels from a
+    location 100 pixels from the top and left edges. Thus \c sourceSize
+    determines the scale, but the actual output image is 512x512 pixels.
+
+    Some image formats are able to conserve CPU time by rendering only the
+    specified region. Others will need to load the entire image first and then
+    clip it to the specified region.
+
+    This property can be cleared to reload the entire image by setting
+    \c sourceClipRect to \c undefined.
+
+    \note \e {Changing this property dynamically causes the image source to be reloaded,
+    potentially even from the network, if it is not in the disk cache.}
+
+    \note Sub-pixel clipping is not supported: the given rectangle will be
+    passed to \l QImageReader::setScaledClipRect().
 */
 
 /*!
@@ -663,7 +705,7 @@ QSGNode *QQuickImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     QSGInternalImageNode *node = static_cast<QSGInternalImageNode *>(oldNode);
     if (!node) {
         d->pixmapChanged = true;
-        node = d->sceneGraphContext()->createInternalImageNode();
+        node = d->sceneGraphContext()->createInternalImageNode(d->sceneGraphRenderContext());
     }
 
     QRectF targetRect;
@@ -676,18 +718,17 @@ QSGNode *QQuickImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 
     int xOffset = 0;
     if (d->hAlign == QQuickImage::AlignHCenter)
-        xOffset = qCeil((width() - pixWidth) / 2.);
+        xOffset = (width() - pixWidth) / 2;
     else if (d->hAlign == QQuickImage::AlignRight)
         xOffset = qCeil(width() - pixWidth);
 
     int yOffset = 0;
     if (d->vAlign == QQuickImage::AlignVCenter)
-        yOffset = qCeil((height() - pixHeight) / 2.);
+        yOffset = (height() - pixHeight) / 2;
     else if (d->vAlign == QQuickImage::AlignBottom)
         yOffset = qCeil(height() - pixHeight);
 
     switch (d->fillMode) {
-    default:
     case Stretch:
         targetRect = QRectF(0, 0, width(), height());
         sourceRect = d->pix.rect();
@@ -699,7 +740,7 @@ QSGNode *QQuickImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         break;
 
     case PreserveAspectCrop: {
-        targetRect = QRect(0, 0, width(), height());
+        targetRect = QRectF(0, 0, width(), height());
         qreal wscale = width() / qreal(d->pix.width());
         qreal hscale = height() / qreal(d->pix.height());
 
@@ -751,7 +792,7 @@ QSGNode *QQuickImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         targetRect = QRectF(x + xOffset, y + yOffset, w, h);
         sourceRect = QRectF(x, y, w, h);
         break;
-    };
+    }
 
     qreal nsWidth = (hWrap == QSGTexture::Repeat || d->fillMode == Pad) ? d->pix.width() / d->devicePixelRatio : d->pix.width();
     qreal nsHeight = (vWrap == QSGTexture::Repeat || d->fillMode == Pad) ? d->pix.height() / d->devicePixelRatio : d->pix.height();
@@ -888,5 +929,17 @@ void QQuickImage::setMipmap(bool use)
 
     By default, this property is set to false.
  */
+
+/*!
+    \qmlproperty int QtQuick::Image::currentFrame
+    \qmlproperty int QtQuick::Image::frameCount
+    \since 5.14
+
+    currentFrame is the frame that is currently visible. The default is \c 0.
+    You can set it to a number between \c 0 and \c {frameCount - 1} to display a
+    different frame, if the image contains multiple frames.
+
+    frameCount is the number of frames in the image. Most images have only one frame.
+*/
 
 QT_END_NAMESPACE

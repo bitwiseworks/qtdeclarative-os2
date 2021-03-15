@@ -61,6 +61,7 @@ class Q_AUTOTEST_EXPORT QQuickIntValidator : public QIntValidator
 {
     Q_OBJECT
     Q_PROPERTY(QString locale READ localeName WRITE setLocaleName RESET resetLocaleName NOTIFY localeNameChanged)
+    QML_NAMED_ELEMENT(IntValidator)
 public:
     QQuickIntValidator(QObject *parent = nullptr);
 
@@ -76,6 +77,7 @@ class Q_AUTOTEST_EXPORT QQuickDoubleValidator : public QDoubleValidator
 {
     Q_OBJECT
     Q_PROPERTY(QString locale READ localeName WRITE setLocaleName RESET resetLocaleName NOTIFY localeNameChanged)
+    QML_NAMED_ELEMENT(DoubleValidator)
 public:
     QQuickDoubleValidator(QObject *parent = nullptr);
 
@@ -95,6 +97,9 @@ QML_DECLARE_TYPE(QValidator)
 QML_DECLARE_TYPE(QQuickIntValidator)
 QML_DECLARE_TYPE(QQuickDoubleValidator)
 QML_DECLARE_TYPE(QRegExpValidator)
+#if QT_CONFIG(regularexpression)
+QML_DECLARE_TYPE(QRegularExpressionValidator)
+#endif
 #endif
 
 #endif // QQUICKVALIDATOR_P_H

@@ -55,8 +55,9 @@
 #include "qqmlcleanup_p.h"
 #include "qqmlmetatype_p.h"
 
-#include <private/qhashedstring_p.h>
+#include <private/qstringhash_p.h>
 #include <private/qqmlimport_p.h>
+#include <private/qqmltypemoduleversion_p.h>
 
 #include <QtCore/qvector.h>
 
@@ -97,7 +98,6 @@ public:
         inline Result(const QQmlImportRef *importNamespace);
         inline Result(const QQmlType &type);
         inline Result(int scriptIndex);
-        inline Result(const Result &);
 
         inline bool isValid() const;
 
@@ -178,11 +178,6 @@ QQmlTypeNameCache::Result::Result(const QQmlType &type)
 
 QQmlTypeNameCache::Result::Result(int scriptIndex)
 : importNamespace(nullptr), scriptIndex(scriptIndex)
-{
-}
-
-QQmlTypeNameCache::Result::Result(const Result &o)
-: type(o.type), importNamespace(o.importNamespace), scriptIndex(o.scriptIndex)
 {
 }
 

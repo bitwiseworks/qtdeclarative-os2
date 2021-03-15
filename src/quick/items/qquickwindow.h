@@ -66,6 +66,7 @@ class QQuickRenderControl;
 class QSGRectangleNode;
 class QSGImageNode;
 class QSGNinePatchNode;
+class QRhi;
 
 class Q_QUICK_EXPORT QQuickWindow : public QWindow
 {
@@ -108,6 +109,11 @@ public:
     };
     Q_ENUM(TextRenderType)
 
+    enum NativeObjectType {
+        NativeObjectTexture
+    };
+    Q_ENUM(NativeObjectType)
+
     explicit QQuickWindow(QWindow *parent = nullptr);
     explicit QQuickWindow(QQuickRenderControl *renderControl);
 
@@ -135,6 +141,13 @@ public:
 #if QT_CONFIG(opengl)
     void resetOpenGLState();
 #endif
+    struct GraphicsStateInfo {
+        int currentFrameSlot;
+        int framesInFlight;
+    };
+    const GraphicsStateInfo &graphicsStateInfo();
+    void beginExternalCommands();
+    void endExternalCommands();
     QQmlIncubationController *incubationController() const;
 
 #if QT_CONFIG(accessibility)
@@ -144,7 +157,17 @@ public:
     // Scene graph specific functions
     QSGTexture *createTextureFromImage(const QImage &image) const;
     QSGTexture *createTextureFromImage(const QImage &image, CreateTextureOptions options) const;
+
+#if QT_DEPRECATED_SINCE(5, 15)
+    QT_DEPRECATED_X("Use createTextureFromNativeObject() instead")
     QSGTexture *createTextureFromId(uint id, const QSize &size, CreateTextureOptions options = CreateTextureOption()) const;
+#endif
+
+    QSGTexture *createTextureFromNativeObject(NativeObjectType type,
+                                              const void *nativeObjectPtr,
+                                              int nativeLayout,
+                                              const QSize &size,
+                                              CreateTextureOptions options = CreateTextureOption()) const;
 
     void setClearBeforeRendering(bool enabled);
     bool clearBeforeRendering() const;
@@ -198,6 +221,8 @@ Q_SIGNALS:
     Q_REVISION(1) void activeFocusItemChanged();
     Q_REVISION(2) void sceneGraphError(QQuickWindow::SceneGraphError error, const QString &message);
 
+    Q_REVISION(14) void beforeRenderPassRecording();
+    Q_REVISION(14) void afterRenderPassRecording();
 
 public Q_SLOTS:
     void update();
@@ -226,6 +251,9 @@ protected:
     void mouseMoveEvent(QMouseEvent *) override;
 #if QT_CONFIG(wheelevent)
     void wheelEvent(QWheelEvent *) override;
+#endif
+#if QT_CONFIG(tabletevent)
+    void tabletEvent(QTabletEvent *) override;
 #endif
 
 private Q_SLOTS:

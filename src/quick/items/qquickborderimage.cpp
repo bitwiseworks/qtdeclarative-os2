@@ -168,6 +168,7 @@ QT_BEGIN_NAMESPACE
 QQuickBorderImage::QQuickBorderImage(QQuickItem *parent)
 : QQuickImageBase(*(new QQuickBorderImagePrivate), parent)
 {
+    connect(this, &QQuickImageBase::sourceSizeChanged, this, &QQuickBorderImage::sourceSizeChanged);
 }
 
 QQuickBorderImage::~QQuickBorderImage()
@@ -295,20 +296,7 @@ void QQuickBorderImage::load()
     Q_D(QQuickBorderImage);
 
     if (d->url.isEmpty()) {
-        d->pix.clear(this);
-        d->status = Null;
-        setImplicitSize(0, 0);
-        emit statusChanged(d->status);
-        if (d->progress != 0.0) {
-            d->progress = 0.0;
-            emit progressChanged(d->progress);
-        }
-        if (sourceSize() != d->oldSourceSize) {
-            d->oldSourceSize = sourceSize();
-            emit sourceSizeChanged();
-        }
-        pixmapChange();
-        return;
+        loadEmptyUrl();
     } else {
         if (d->url.path().endsWith(QLatin1String("sci"))) {
             QString lf = QQmlFile::urlToLocalFileOrQrc(d->url);
@@ -316,7 +304,6 @@ void QQuickBorderImage::load()
                 QFile file(lf);
                 file.open(QIODevice::ReadOnly);
                 setGridScaledImage(QQuickGridScaledImage(&file));
-                return;
             } else {
 #if QT_CONFIG(qml_network)
                 if (d->progress != 0.0) {
@@ -327,51 +314,14 @@ void QQuickBorderImage::load()
                 QNetworkRequest req(d->url);
                 d->sciReply = qmlEngine(this)->networkAccessManager()->get(req);
                 qmlobject_connect(d->sciReply, QNetworkReply, SIGNAL(finished()),
-                                  this, QQuickBorderImage, SLOT(sciRequestFinished()))
+                                  this, QQuickBorderImage, SLOT(sciRequestFinished()));
+                emit statusChanged(d->status);
 #endif
             }
         } else {
-            QQuickPixmap::Options options;
-            if (d->async)
-                options |= QQuickPixmap::Asynchronous;
-            if (d->cache)
-                options |= QQuickPixmap::Cache;
-            d->pix.clear(this);
-
-            const qreal targetDevicePixelRatio = (window() ? window()->effectiveDevicePixelRatio() : qGuiApp->devicePixelRatio());
-            d->devicePixelRatio = 1.0;
-
-            QUrl loadUrl = d->url;
-            resolve2xLocalFile(d->url, targetDevicePixelRatio, &loadUrl, &d->devicePixelRatio);
-            d->pix.load(qmlEngine(this), loadUrl, d->sourcesize * d->devicePixelRatio, options);
-
-            if (d->pix.isLoading()) {
-                if (d->progress != 0.0) {
-                    d->progress = 0.0;
-                    emit progressChanged(d->progress);
-                }
-                d->status = Loading;
-
-                static int thisRequestProgress = -1;
-                static int thisRequestFinished = -1;
-                if (thisRequestProgress == -1) {
-                    thisRequestProgress =
-                        QQuickImageBase::staticMetaObject.indexOfSlot("requestProgress(qint64,qint64)");
-                    thisRequestFinished =
-                        QQuickImageBase::staticMetaObject.indexOfSlot("requestFinished()");
-                }
-                d->pix.connectFinished(this, thisRequestFinished);
-                d->pix.connectDownloadProgress(this, thisRequestProgress);
-
-                update(); //pixmap may have invalidated texture, updatePaintNode needs to be called before the next repaint
-            } else {
-                requestFinished();
-                return;
-            }
+            loadPixmap(d->url, LoadPixmapOptions(HandleDPR | UseProviderOptions));
         }
     }
-
-    emit statusChanged(d->status);
 }
 
 /*!
@@ -472,39 +422,7 @@ void QQuickBorderImage::setGridScaledImage(const QQuickGridScaledImage& sci)
         d->verticalTileMode = sci.verticalTileRule();
 
         d->sciurl = d->url.resolved(QUrl(sci.pixmapUrl()));
-
-        QQuickPixmap::Options options;
-        if (d->async)
-            options |= QQuickPixmap::Asynchronous;
-        if (d->cache)
-            options |= QQuickPixmap::Cache;
-        d->pix.clear(this);
-        d->pix.load(qmlEngine(this), d->sciurl, options);
-
-        if (d->pix.isLoading()) {
-            if (d->progress != 0.0) {
-                d->progress = 0.0;
-                emit progressChanged(d->progress);
-            }
-            if (d->status != Loading) {
-                d->status = Loading;
-                emit statusChanged(d->status);
-            }
-            static int thisRequestProgress = -1;
-            static int thisRequestFinished = -1;
-            if (thisRequestProgress == -1) {
-                thisRequestProgress =
-                    QQuickBorderImage::staticMetaObject.indexOfSlot("requestProgress(qint64,qint64)");
-                thisRequestFinished =
-                    QQuickBorderImage::staticMetaObject.indexOfSlot("requestFinished()");
-            }
-
-            d->pix.connectFinished(this, thisRequestFinished);
-            d->pix.connectDownloadProgress(this, thisRequestProgress);
-
-        } else {
-            requestFinished();
-        }
+        loadPixmap(d->sciurl);
     }
 }
 
@@ -533,6 +451,10 @@ void QQuickBorderImage::requestFinished()
     if (sourceSize() != d->oldSourceSize) {
         d->oldSourceSize = sourceSize();
         emit sourceSizeChanged();
+    }
+    if (d->frameCount != d->pix.frameCount()) {
+        d->frameCount = d->pix.frameCount();
+        emit frameCountChanged();
     }
 
     pixmapChange();
@@ -647,7 +569,7 @@ QSGNode *QQuickBorderImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeDat
     bool updatePixmap = d->pixmapChanged;
     d->pixmapChanged = false;
     if (!node) {
-        node = d->sceneGraphContext()->createInternalImageNode();
+        node = d->sceneGraphContext()->createInternalImageNode(d->sceneGraphRenderContext());
         updatePixmap = true;
     }
 
@@ -692,6 +614,18 @@ void QQuickBorderImage::pixmapChange()
     d->pixmapChanged = true;
     update();
 }
+
+/*!
+    \qmlproperty int QtQuick::BorderImage::currentFrame
+    \qmlproperty int QtQuick::BorderImage::frameCount
+    \since 5.14
+
+    currentFrame is the frame that is currently visible. The default is \c 0.
+    You can set it to a number between \c 0 and \c {frameCount - 1} to display a
+    different frame, if the image contains multiple frames.
+
+    frameCount is the number of frames in the image. Most images have only one frame.
+*/
 
 QT_END_NAMESPACE
 

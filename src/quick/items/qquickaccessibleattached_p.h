@@ -90,6 +90,10 @@ class Q_QUICK_PRIVATE_EXPORT QQuickAccessibleAttached : public QObject
     Q_PROPERTY(QString description READ description WRITE setDescription NOTIFY descriptionChanged FINAL)
     Q_PROPERTY(bool ignored READ ignored WRITE setIgnored NOTIFY ignoredChanged FINAL)
 
+    QML_NAMED_ELEMENT(Accessible)
+    QML_UNCREATABLE("Accessible is only available via attached properties.")
+    QML_ATTACHED(QQuickAccessibleAttached)
+
 public:
     Q_ENUMS(QAccessible::Role QAccessible::Event)
     STATE_PROPERTY(checkable)
@@ -118,7 +122,10 @@ public:
             return QString();
         return m_name;
     }
+
+    bool wasNameExplicitlySet() const;
     void setName(const QString &name) {
+        m_nameExplicitlySet = true;
         if (name != m_name) {
             m_name = name;
             Q_EMIT nameChanged();
@@ -126,6 +133,7 @@ public:
             QAccessible::updateAccessibility(&ev);
         }
     }
+    void setNameImplicitly(const QString &name);
 
     QString description() const { return m_description; }
     void setDescription(const QString &description)
@@ -210,12 +218,13 @@ Q_SIGNALS:
     void nextPageAction();
 
 private:
-    QQuickItem *item() const { return static_cast<QQuickItem*>(parent()); }
+    QQuickItem *item() const { return qobject_cast<QQuickItem*>(parent()); }
 
     QAccessible::Role m_role;
     QAccessible::State m_state;
     QAccessible::State m_stateExplicitlySet;
     QString m_name;
+    bool m_nameExplicitlySet = false;
     QString m_description;
 
     static QMetaMethod sigPress;
@@ -237,7 +246,6 @@ public:
 QT_END_NAMESPACE
 
 QML_DECLARE_TYPE(QQuickAccessibleAttached)
-QML_DECLARE_TYPEINFO(QQuickAccessibleAttached, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif // accessibility
 

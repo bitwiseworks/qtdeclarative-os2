@@ -47,7 +47,6 @@
 #include <QQmlExpression>
 
 #include <private/qv4qobjectwrapper_p.h>
-#include <private/qv8engine_p.h>
 #include <private/qjsvalue_p.h>
 #include <private/qv4scopedvalue_p.h>
 #include <private/qqmlcontext_p.h>
@@ -177,15 +176,17 @@ void SignalTransition::connectTriggered()
     int signalIndex = QMetaObjectPrivate::signalIndex(metaMethod);
 
     auto f = m_compilationUnit->runtimeFunctions[binding->value.compiledScriptIndex];
-    QQmlBoundSignalExpression *expression =
-            ctxtdata ? new QQmlBoundSignalExpression(target, signalIndex, ctxtdata, this, f)
-                     : nullptr;
-    if (expression)
+    if (ctxtdata) {
+        QQmlBoundSignalExpression *expression =
+                new QQmlBoundSignalExpression(target, signalIndex, ctxtdata, this, f);
         expression->setNotifyOnValueChanged(false);
-    m_signalExpression = expression;
+        m_signalExpression.take(expression);
+    } else {
+        m_signalExpression.take(nullptr);
+    }
 }
 
-void SignalTransitionParser::verifyBindings(const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &props)
+void SignalTransitionParser::verifyBindings(const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &props)
 {
     for (int ii = 0; ii < props.count(); ++ii) {
         const QV4::CompiledData::Binding *binding = props.at(ii);
@@ -204,7 +205,9 @@ void SignalTransitionParser::verifyBindings(const QQmlRefPointer<QV4::CompiledDa
     }
 }
 
-void SignalTransitionParser::applyBindings(QObject *object, const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &bindings)
+void SignalTransitionParser::applyBindings(
+        QObject *object, const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit,
+        const QList<const QV4::CompiledData::Binding *> &bindings)
 {
     SignalTransition *st = qobject_cast<SignalTransition*>(object);
     st->m_compilationUnit = compilationUnit;
@@ -267,8 +270,6 @@ void SignalTransitionParser::applyBindings(QObject *object, const QQmlRefPointer
     \qmlsignal QAbstractTransition::triggered()
 
     This signal is emitted when the transition has been triggered.
-
-    The corresponding handler is \c onTriggered.
 */
 
 /*!

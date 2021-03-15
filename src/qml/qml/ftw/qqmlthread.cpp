@@ -131,6 +131,9 @@ QQmlThreadPrivate::QQmlThreadPrivate(QQmlThread *q)
   m_mainThreadWaiting(false), mainSync(nullptr), m_mainObject(this)
 {
     setObjectName(QStringLiteral("QQmlThread"));
+    // This size is aligned with the recursion depth limits in the parser/codegen. In case of
+    // absurd content we want to hit the recursion checks instead of running out of stack.
+    setStackSize(8 * 1024 * 1024);
 }
 
 bool QQmlThreadPrivate::event(QEvent *e)
@@ -185,13 +188,7 @@ void QQmlThreadPrivate::threadEvent()
     lock();
 
     for (;;) {
-        if (m_shutdown) {
-            quit();
-            wakeOne();
-            unlock();
-
-            return;
-        } else if (!threadList.isEmpty()) {
+        if (!threadList.isEmpty()) {
             m_threadProcessing = true;
 
             QQmlThread::Message *message = threadList.first();
@@ -203,6 +200,12 @@ void QQmlThreadPrivate::threadEvent()
             lock();
 
             delete threadList.takeFirst();
+        } else if (m_shutdown) {
+            quit();
+            wakeOne();
+            unlock();
+
+            return;
         } else {
             wakeOne();
 
@@ -239,6 +242,7 @@ void QQmlThread::shutdown()
     d->lock();
     Q_ASSERT(!d->m_shutdown);
 
+    d->m_shutdown = true;
     for (;;) {
         if (d->mainSync || !d->mainList.isEmpty()) {
             d->unlock();
@@ -251,13 +255,10 @@ void QQmlThread::shutdown()
         }
     }
 
-    d->m_shutdown = true;
-    if (QCoreApplication::closingDown()) {
+    if (QCoreApplication::closingDown())
         d->quit();
-    } else {
+    else
         d->triggerThreadEvent();
-        d->wait();
-    }
 
     d->unlock();
     d->QThread::wait();

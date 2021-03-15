@@ -137,7 +137,6 @@ void tst_MptaInterop::touchDrag()
 // TODO touchesThenPinch_data with press/release sequences somehow: vectors of touchpoint IDs? or a string representation?
 void tst_MptaInterop::touchesThenPinch()
 {
-    const int dragThreshold = QGuiApplication::styleHints()->startDragDistance();
     QScopedPointer<QQuickView> windowPtr;
     createView(windowPtr, "pinchDragMPTA.qml");
     QQuickView * window = windowPtr.data();
@@ -296,10 +295,10 @@ void tst_MptaInterop::unloadHandlerWithPassiveGrab()
     QVERIFY(mpta);
 
     QPoint point(90, 90);
-    QTest::mousePress(window, Qt::LeftButton, 0, point);
+    QTest::mousePress(window, Qt::LeftButton, {}, point);
     QCOMPARE(window->mouseGrabberItem(), mpta);
     QTRY_VERIFY(handler.isNull()); // it got unloaded
-    QTest::mouseRelease(window, Qt::LeftButton, 0, point); // QTBUG-73819: don't crash
+    QTest::mouseRelease(window, Qt::LeftButton, {}, point); // QTBUG-73819: don't crash
 }
 
 void tst_MptaInterop::dragHandlerInParentStealingGrabFromItem() // QTBUG-75025

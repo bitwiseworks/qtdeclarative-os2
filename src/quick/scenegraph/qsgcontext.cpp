@@ -271,8 +271,8 @@ QSGInternalRectangleNode *QSGContext::createInternalRectangleNode(const QRectF &
 
 /*!
     Creates a new shader effect helper instance. This function is called on the
-    gui thread, unlike the others. This is necessary in order to provide
-    adaptable, backend-specific shader effect functionality to the gui thread too.
+    GUI thread, unlike the others. This is necessary in order to provide
+    adaptable, backend-specific shader effect functionality to the GUI thread too.
  */
 QSGGuiThreadShaderEffectManager *QSGContext::createGuiThreadShaderEffectManager()
 {
@@ -305,7 +305,7 @@ QSize QSGContext::minimumFBOSize() const
 /*!
     Returns a pointer to the (presumably) global renderer interface.
 
-    \note This function may be called on the gui thread in order to get access
+    \note This function may be called on the GUI thread in order to get access
     to QSGRendererInterface::graphicsApi() and other getters.
 
     \note it is expected that the simple queries (graphicsApi, shaderType,
@@ -332,19 +332,73 @@ QSGRenderContext::~QSGRenderContext()
 {
 }
 
-void QSGRenderContext::initialize(void *context)
+void QSGRenderContext::initialize(const InitParams *params)
 {
-    Q_UNUSED(context);
+    Q_UNUSED(params);
 }
 
 void QSGRenderContext::invalidate()
 {
 }
 
+void QSGRenderContext::prepareSync(qreal devicePixelRatio, QRhiCommandBuffer *cb)
+{
+    Q_UNUSED(devicePixelRatio);
+    Q_UNUSED(cb);
+}
+
+void QSGRenderContext::beginNextFrame(QSGRenderer *renderer,
+                                      RenderPassCallback mainPassRecordingStart,
+                                      RenderPassCallback mainPassRecordingEnd,
+                                      void *callbackUserData)
+{
+    Q_UNUSED(renderer);
+    Q_UNUSED(mainPassRecordingStart);
+    Q_UNUSED(mainPassRecordingEnd);
+    Q_UNUSED(callbackUserData);
+}
+
+void QSGRenderContext::endNextFrame(QSGRenderer *renderer)
+{
+    Q_UNUSED(renderer);
+}
+
+void QSGRenderContext::beginNextRhiFrame(QSGRenderer *renderer,
+                                         QRhiRenderTarget *rt, QRhiRenderPassDescriptor *rp, QRhiCommandBuffer *cb,
+                                         RenderPassCallback mainPassRecordingStart,
+                                         RenderPassCallback mainPassRecordingEnd,
+                                         void *callbackUserData)
+{
+    Q_UNUSED(renderer);
+    Q_UNUSED(rt);
+    Q_UNUSED(rp);
+    Q_UNUSED(cb);
+    Q_UNUSED(mainPassRecordingStart);
+    Q_UNUSED(mainPassRecordingEnd);
+    Q_UNUSED(callbackUserData);
+}
+
+void QSGRenderContext::renderNextRhiFrame(QSGRenderer *renderer)
+{
+    Q_UNUSED(renderer);
+}
+
+void QSGRenderContext::endNextRhiFrame(QSGRenderer *renderer)
+{
+    Q_UNUSED(renderer);
+}
+
 void QSGRenderContext::endSync()
 {
     qDeleteAll(m_texturesToDelete);
     m_texturesToDelete.clear();
+}
+
+/*!
+    Do necessary preprocessing before the frame
+*/
+void QSGRenderContext::preprocess()
+{
 }
 
 /*!
@@ -360,6 +414,11 @@ void QSGRenderContext::registerFontengineForCleanup(QFontEngine *engine)
 {
     engine->ref.ref();
     m_fontEnginesToClean << engine;
+}
+
+QRhi *QSGRenderContext::rhi() const
+{
+    return nullptr;
 }
 
 /*!

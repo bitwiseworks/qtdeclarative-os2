@@ -1,5 +1,9 @@
 QT += qml quick
 
+CONFIG += qmltypes
+QML_IMPORT_NAME = SceneGraphRendering
+QML_IMPORT_MAJOR_VERSION = 2
+
 HEADERS += customrenderitem.h \
            openglrenderer.h \
            softwarerenderer.h
@@ -21,4 +25,10 @@ qtConfig(d3d12) {
     HEADERS += d3d12renderer.h
     SOURCES += d3d12renderer.cpp
     LIBS += -ld3d12
+}
+
+macos {
+    HEADERS += metalrenderer.h
+    SOURCES += metalrenderer.mm
+    LIBS += -framework Metal -framework AppKit
 }

@@ -60,6 +60,7 @@
 #include "qqmlerror.h"
 #include "qqml.h"
 #include <private/qqmlobjectcreator_p.h>
+#include <private/qqmltypedata_p.h>
 
 #include <QtCore/QString>
 #include <QtCore/QStringList>
@@ -85,8 +86,9 @@ public:
 
     QObject *beginCreate(QQmlContextData *);
     void completeCreate();
-    void initializeObjectWithInitialProperties(QV4::QmlContext *qmlContext, const QV4::Value &valuemap, QObject *toCreate);
-    static void setInitialProperties(QV4::ExecutionEngine *engine, QV4::QmlContext *qmlContext, const QV4::Value &o, const QV4::Value &v);
+    void initializeObjectWithInitialProperties(QV4::QmlContext *qmlContext, const QV4::Value &valuemap, QObject *toCreate, RequiredProperties &requiredProperties);
+    static void setInitialProperties(QV4::ExecutionEngine *engine, QV4::QmlContext *qmlContext, const QV4::Value &o, const QV4::Value &v, RequiredProperties &requiredProperties, QObject *createdComponent);
+    static QQmlError unsetRequiredPropertyToQQmlError(const RequiredPropertyInfo &unsetRequiredProperty);
 
     virtual void incubateObject(
             QQmlIncubator *incubationTask,
@@ -105,7 +107,9 @@ public:
     qreal progress;
 
     int start;
-    QQmlRefPointer<QV4::CompiledData::CompilationUnit> compilationUnit;
+    RequiredProperties& requiredProperties();
+    bool hadRequiredProperties() const;
+    QQmlRefPointer<QV4::ExecutableCompilationUnit> compilationUnit;
 
     struct ConstructionState {
         ConstructionState()
@@ -133,6 +137,7 @@ public:
     static void completeDeferred(QQmlEnginePrivate *enginePriv, DeferredState *deferredState);
 
     static void complete(QQmlEnginePrivate *enginePriv, ConstructionState *state);
+    static QQmlProperty removePropertyFromRequired(QObject *createdComponent, const QString &name, RequiredProperties& requiredProperties, bool *wasInRequiredProperties = nullptr);
 
     QQmlEngine *engine;
     QQmlGuardedContextData creationContext;
@@ -142,6 +147,9 @@ public:
     static QQmlComponentPrivate *get(QQmlComponent *c) {
         return static_cast<QQmlComponentPrivate *>(QObjectPrivate::get(c));
     }
+
+    QObject *doBeginCreate(QQmlComponent *q, QQmlContext *context);
+    bool setInitialProperty(QObject *component, const QString &name, const QVariant& value);
 };
 
 QT_END_NAMESPACE

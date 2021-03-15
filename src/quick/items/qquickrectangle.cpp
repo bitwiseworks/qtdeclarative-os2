@@ -257,7 +257,7 @@ QQuickGradient::~QQuickGradient()
 
 QQmlListProperty<QQuickGradientStop> QQuickGradient::stops()
 {
-    return QQmlListProperty<QQuickGradientStop>(this, m_stops);
+    return QQmlListProperty<QQuickGradientStop>(this, &m_stops);
 }
 
 /*!
@@ -451,8 +451,30 @@ void QQuickRectangle::setGradient(const QJSValue &gradient)
             d->gradient = QJSValue();
         }
     } else if (gradient.isNumber() || gradient.isString()) {
-        QGradient preset(gradient.toVariant().value<QGradient::Preset>());
-        if (preset.type() != QGradient::NoGradient) {
+        static const QMetaEnum gradientPresetMetaEnum = QMetaEnum::fromType<QGradient::Preset>();
+        Q_ASSERT(gradientPresetMetaEnum.isValid());
+
+        QGradient result;
+
+        // This code could simply use gradient.toVariant().convert<QGradient::Preset>(),
+        // but QTBUG-76377 prevents us from doing error checks. So we need to
+        // do them manually. Also, NumPresets cannot be used.
+
+        if (gradient.isNumber()) {
+            const auto preset = QGradient::Preset(gradient.toInt());
+            if (preset != QGradient::NumPresets && gradientPresetMetaEnum.valueToKey(preset))
+                result = QGradient(preset);
+        } else if (gradient.isString()) {
+            const auto presetName = gradient.toString();
+            if (presetName != QLatin1String("NumPresets")) {
+                bool ok;
+                const auto presetInt = gradientPresetMetaEnum.keyToValue(qPrintable(presetName), &ok);
+                if (ok)
+                    result = QGradient(QGradient::Preset(presetInt));
+            }
+        }
+
+        if (result.type() != QGradient::NoGradient) {
             d->gradient = gradient;
         } else {
             qmlWarning(this) << "No such gradient preset '" << gradient.toString() << "'";
@@ -584,7 +606,7 @@ QSGNode *QQuickRectangle::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData 
                 // QSGInternalRectangleNode doesn't support stops in the wrong order,
                 // so we need to manually reverse them here.
                 QGradientStops reverseStops;
-                for (auto it = stops.rbegin(); it != stops.rend(); ++it) {
+                for (auto it = stops.crbegin(); it != stops.crend(); ++it) {
                     auto stop = *it;
                     stop.first = 1 - stop.first;
                     reverseStops.append(stop);

@@ -4,12 +4,8 @@ HEADERS += \
     $$PWD/qqmljsastvisitor_p.h \
     $$PWD/qqmljsengine_p.h \
     $$PWD/qqmljslexer_p.h \
-    $$PWD/qqmljsmemorypool_p.h \
     $$PWD/qqmljsglobal_p.h \
-    $$PWD/qqmljskeywords_p.h \
-    $$PWD/qqmljsengine_p.h \
-    $$PWD/qqmljsglobal_p.h \
-    $$PWD/qqmljssourcelocation_p.h
+    $$PWD/qqmljskeywords_p.h
 
 SOURCES += \
     $$PWD/qqmljsast.cpp \

@@ -1025,16 +1025,17 @@ void tst_qquickpositioners::populateTransitions(const QString &positionerObjectN
 
     QScopedPointer<QQuickView> window(QQuickViewTestUtil::createView());
 
-    QQmlContext *ctxt = window->rootContext();
-    ctxt->setContextProperty("usePopulateTransition", usePopulateTransition);
-    ctxt->setContextProperty("enableAddTransition", true);
-    ctxt->setContextProperty("dynamicallyPopulate", dynamicallyPopulate);
-    ctxt->setContextProperty("testModel", &model);
-    ctxt->setContextProperty("model_targetItems_transitionFrom", &model_targetItems_transitionFrom);
-    ctxt->setContextProperty("model_displacedItems_transitionVia", &model_displacedItems_transitionVia);
-    ctxt->setContextProperty("targetItems_transitionFrom", targetItems_transitionFrom);
-    ctxt->setContextProperty("displacedItems_transitionVia", displacedItems_transitionVia);
-    ctxt->setContextProperty("testedPositioner", positionerObjectName);
+    window->setInitialProperties({
+            {"usePopulateTransition", usePopulateTransition},
+            {"enableAddTransition", true},
+            {"dynamicallyPopulate", dynamicallyPopulate},
+            {"testModel", QVariant::fromValue(&model)},
+            {"model_targetItems_transitionFrom", QVariant::fromValue(&model_targetItems_transitionFrom)},
+            {"model_displacedItems_transitionVia", QVariant::fromValue(&model_displacedItems_transitionVia)},
+            {"targetItems_transitionFrom", targetItems_transitionFrom},
+            {"displacedItems_transitionVia", displacedItems_transitionVia},
+            {"testedPositioner", positionerObjectName}
+    });
     window->setSource(testFileUrl(qmlFile));
 
     QQuickItem *positioner = window->rootObject()->findChild<QQuickItem*>(positionerObjectName);
@@ -1111,16 +1112,17 @@ void tst_qquickpositioners::addTransitions(const QString &positionerObjectName)
     QaimModel model_displacedItems_transitionVia;
 
     QScopedPointer<QQuickView> window(QQuickViewTestUtil::createView());
-    QQmlContext *ctxt = window->rootContext();
-    ctxt->setContextProperty("usePopulateTransition", QVariant(false));
-    ctxt->setContextProperty("enableAddTransition", QVariant(true));
-    ctxt->setContextProperty("dynamicallyPopulate", QVariant(false));
-    ctxt->setContextProperty("testModel", &model);
-    ctxt->setContextProperty("model_targetItems_transitionFrom", &model_targetItems_transitionFrom);
-    ctxt->setContextProperty("model_displacedItems_transitionVia", &model_displacedItems_transitionVia);
-    ctxt->setContextProperty("targetItems_transitionFrom", targetItems_transitionFrom);
-    ctxt->setContextProperty("displacedItems_transitionVia", displacedItems_transitionVia);
-    ctxt->setContextProperty("testedPositioner", QString());
+    window->setInitialProperties({
+            {"usePopulateTransition", QVariant(false)},
+            {"enableAddTransition", QVariant(true)},
+            {"dynamicallyPopulate", QVariant(false)},
+            {"testModel", QVariant::fromValue(&model)},
+            {"model_targetItems_transitionFrom", QVariant::fromValue(&model_targetItems_transitionFrom)},
+            {"model_displacedItems_transitionVia", QVariant::fromValue(&model_displacedItems_transitionVia)},
+            {"targetItems_transitionFrom", targetItems_transitionFrom},
+            {"displacedItems_transitionVia", displacedItems_transitionVia},
+            {"testedPositioner", QString()}
+    });
     window->setSource(testFileUrl(qmlFile));
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window.data()));
@@ -1234,16 +1236,17 @@ void tst_qquickpositioners::moveTransitions(const QString &positionerObjectName)
     QaimModel model_displacedItems_transitionVia;
 
     QScopedPointer<QQuickView> window(QQuickViewTestUtil::createView());
-    QQmlContext *ctxt = window->rootContext();
-    ctxt->setContextProperty("usePopulateTransition", QVariant(false));
-    ctxt->setContextProperty("enableAddTransition", QVariant(false));
-    ctxt->setContextProperty("dynamicallyPopulate", QVariant(false));
-    ctxt->setContextProperty("testModel", &model);
-    ctxt->setContextProperty("model_targetItems_transitionFrom", &model_targetItems_transitionFrom);
-    ctxt->setContextProperty("model_displacedItems_transitionVia", &model_displacedItems_transitionVia);
-    ctxt->setContextProperty("targetItems_transitionFrom", targetItems_transitionFrom);
-    ctxt->setContextProperty("displacedItems_transitionVia", displacedItems_transitionVia);
-    ctxt->setContextProperty("testedPositioner", QString());
+    window->setInitialProperties({
+            {"usePopulateTransition", QVariant(false)},
+            {"enableAddTransition", QVariant(false)},
+            {"dynamicallyPopulate", QVariant(false)},
+            {"testModel", QVariant::fromValue(&model)},
+            {"model_targetItems_transitionFrom", QVariant::fromValue(&model_targetItems_transitionFrom)},
+            {"model_displacedItems_transitionVia", QVariant::fromValue(&model_displacedItems_transitionVia)},
+            {"targetItems_transitionFrom", targetItems_transitionFrom},
+            {"displacedItems_transitionVia", displacedItems_transitionVia},
+            {"testedPositioner", QString()}
+    });
     window->setSource(testFileUrl(qmlFile));
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window.data()));
@@ -4029,11 +4032,13 @@ QQuickView *tst_qquickpositioners::createView(const QString &filename, bool wait
 
 void tst_qquickpositioners::matchIndexLists(const QVariantList &indexLists, const QList<int> &expectedIndexes)
 {
+    const QSet<int> expectedIndexSet(expectedIndexes.cbegin(), expectedIndexes.cend());
     for (int i=0; i<indexLists.count(); i++) {
-        QSet<int> current = indexLists[i].value<QList<int> >().toSet();
-        if (current != expectedIndexes.toSet())
+        const auto &currentList = indexLists[i].value<QList<int> >();
+        const QSet<int> current(currentList.cbegin(), currentList.cend());
+        if (current != expectedIndexSet)
             qDebug() << "Cannot match actual targets" << current << "with expected" << expectedIndexes;
-        QCOMPARE(current, expectedIndexes.toSet());
+        QCOMPARE(current, expectedIndexSet);
     }
 }
 

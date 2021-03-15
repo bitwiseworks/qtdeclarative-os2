@@ -70,6 +70,7 @@ PRIVATETESTS += \
     qqmltranslation \
     qqmlimport \
     qqmlobjectmodel \
+    qqmltablemodel \
     qv4assembler \
     qv4mm \
     qv4identifiertable \
@@ -90,7 +91,7 @@ SUBDIRS += $$METATYPETESTS
 qtConfig(process) {
     qtConfig(qml-debug): SUBDIRS += debugger
     !boot2qt {
-        SUBDIRS += qmllint qmlplugindump
+        SUBDIRS += qmlformat qmllint qmlplugindump
     }
 }
 
@@ -105,6 +106,5 @@ qtNomakeTools( \
     qmlplugindump \
 )
 
-QtConfig(qml_tracing) {
-    PRIVATETESTS += v4traced
-}
+!cross_compile: \
+    SUBDIRS += qmltyperegistrar

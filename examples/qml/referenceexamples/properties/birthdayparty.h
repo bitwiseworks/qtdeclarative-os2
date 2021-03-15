@@ -67,8 +67,9 @@ class BirthdayParty : public QObject
     Q_PROPERTY(QQmlListProperty<Person> guests READ guests)
 // ![2]
 // ![3]
+    QML_ELEMENT
 public:
-    BirthdayParty(QObject *parent = 0);
+    BirthdayParty(QObject *parent = nullptr);
 
     Person *host() const;
     void setHost(Person *);
@@ -78,12 +79,16 @@ public:
     int guestCount() const;
     Person *guest(int) const;
     void clearGuests();
+    void replaceGuest(int, Person*);
+    void removeLastGuest();
 
 private:
     static void appendGuest(QQmlListProperty<Person>*, Person*);
     static int guestCount(QQmlListProperty<Person>*);
     static Person* guest(QQmlListProperty<Person>*, int);
     static void clearGuests(QQmlListProperty<Person>*);
+    static void replaceGuest(QQmlListProperty<Person>*, int, Person*);
+    static void removeLastGuest(QQmlListProperty<Person>*);
 
     Person *m_host;
     QVector<Person *> m_guests;

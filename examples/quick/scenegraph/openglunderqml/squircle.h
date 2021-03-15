@@ -70,6 +70,7 @@ public:
     void setWindow(QQuickWindow *window) { m_window = window; }
 
 public slots:
+    void init();
     void paint();
 
 private:
@@ -85,6 +86,7 @@ class Squircle : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(qreal t READ t WRITE setT NOTIFY tChanged)
+    QML_ELEMENT
 
 public:
     Squircle();
@@ -103,6 +105,8 @@ private slots:
     void handleWindowChanged(QQuickWindow *win);
 
 private:
+    void releaseResources() override;
+
     qreal m_t;
     SquircleRenderer *m_renderer;
 };

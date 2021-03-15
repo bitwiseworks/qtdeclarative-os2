@@ -335,7 +335,7 @@ void QQmlSettingsPrivate::load()
         const QVariant currentValue = instance()->value(property.name(), previousValue);
 
         if (!currentValue.isNull() && (!previousValue.isValid()
-                || (currentValue.canConvert(previousValue.type()) && previousValue != currentValue))) {
+                || (currentValue.canConvert(previousValue.userType()) && previousValue != currentValue))) {
             property.write(q, currentValue);
             qCDebug(lcSettings) << "QQmlSettings: load" << property.name() << "setting:" << currentValue << "default:" << previousValue;
         }
@@ -473,7 +473,7 @@ QVariant QQmlSettings::value(const QString &key, const QVariant &defaultValue) c
 /*!
    \qmlmethod Settings::setValue(string key, var value)
 
-   Sets the value of setting key to value. If the key already exists,
+   Sets the value of setting \a key to \a value. If the key already exists,
    the previous value is overwritten.
 
    \since Qt 5.12

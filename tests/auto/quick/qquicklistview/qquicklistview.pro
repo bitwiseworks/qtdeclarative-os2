@@ -5,7 +5,8 @@ macx:CONFIG -= app_bundle
 
 HEADERS += incrementalmodel.h \
            proxytestinnermodel.h \
-           randomsortmodel.h
+           randomsortmodel.h \
+           reusemodel.h
 SOURCES += tst_qquicklistview.cpp \
            incrementalmodel.cpp \
            proxytestinnermodel.cpp \
@@ -18,5 +19,5 @@ include (../shared/util.pri)
 TESTDATA = data/*
 DISTFILES += data/*
 
-QT += core-private gui-private qml-private quick-private testlib qmltest
+QT += core-private gui-private qml-private quick-private testlib qmltest qmlmodels-private
 

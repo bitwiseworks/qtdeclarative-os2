@@ -5,10 +5,14 @@ qtHaveModule(widgets): QT += widgets
 HEADERS += conf.h
 SOURCES += main.cpp
 RESOURCES += qml.qrc
+CONFIG += qmltypes
+
+QML_IMPORT_NAME = QmlRuntime.Config
+QML_IMPORT_VERSION = 1.0
 
 QMAKE_TARGET_DESCRIPTION = QML Runtime
 
-ICON = resources/qml64.png
+ICON = resources/qml-64.png
 win32 {
     RC_ICONS = resources/qml.ico
 }

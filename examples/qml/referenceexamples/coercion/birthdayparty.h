@@ -60,9 +60,10 @@ class BirthdayParty : public QObject
 // ![0]
     Q_PROPERTY(Person *host READ host WRITE setHost)
     Q_PROPERTY(QQmlListProperty<Person> guests READ guests)
+    QML_ELEMENT
 // ![0]
 public:
-    BirthdayParty(QObject *parent = 0);
+    BirthdayParty(QObject *parent = nullptr);
 
     Person *host() const;
     void setHost(Person *);

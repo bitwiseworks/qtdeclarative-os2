@@ -39,6 +39,7 @@
 #include "testhttpserver.h"
 #include "../../shared/util.h"
 #include "../shared/geometrytestutil.h"
+#include <QQmlApplicationEngine>
 
 Q_LOGGING_CATEGORY(lcTests, "qt.quick.tests")
 
@@ -128,6 +129,9 @@ private slots:
     void rootContext();
     void sourceURLKeepComponent();
 
+    void statusChangeOnlyEmittedOnce();
+
+    void setSourceAndCheckStatus();
 };
 
 Q_DECLARE_METATYPE(QList<QQmlError>)
@@ -681,6 +685,21 @@ void tst_QQuickLoader::initialPropertyValues_data()
             << QStringList()
             << (QStringList() << "initialValue")
             << (QVariantList() << 6);
+
+    QTest::newRow("ensure required properties are set correctly") << testFileUrl("initialPropertyValues.9.qml")
+            << QStringList()
+            << (QStringList() << "i" << "s")
+            << (QVariantList() << 42 << QLatin1String("hello world"));
+
+    QTest::newRow("required properties only partially set =") << testFileUrl("initialPropertyValues.10.qml")
+            << (QStringList() << QString(testFileUrl("RequiredPropertyValuesComponent.qml").toString() +  QLatin1String(":6:5: Required property s was not initialized")))
+            << (QStringList() << "i" << "s")
+            << (QVariantList() << 0 << QLatin1String(""));
+
+    QTest::newRow("source url changed, previously initial properties are discared") << testFileUrl("initialPropertyValues.11.qml")
+                                                                                    << QStringList()
+                                                                                    << (QStringList() << "oldi" << "i")
+                                                                                    << (QVariantList() << 12 << 42);
 }
 
 void tst_QQuickLoader::initialPropertyValues()
@@ -1439,6 +1458,37 @@ void tst_QQuickLoader::sourceURLKeepComponent()
     loader->setSource(testFileUrl("/Rect120x60.qml"));
     QVERIFY(loader->sourceComponent() != newSourceComponent.data());
 
+}
+
+// QTBUG-82002
+void tst_QQuickLoader::statusChangeOnlyEmittedOnce()
+{
+    QQmlApplicationEngine engine;
+    auto url = testFileUrl("statusChanged.qml");
+    engine.load(url);
+    auto root = engine.rootObjects().at(0);
+    QVERIFY(root);
+    QTRY_COMPARE(QQuickLoader::Status(root->property("status").toInt()), QQuickLoader::Ready);
+    QCOMPARE(root->property("statusChangedCounter").toInt(), 2); // 1xLoading + 1xReady*/
+}
+
+void tst_QQuickLoader::setSourceAndCheckStatus()
+{
+    QQmlApplicationEngine engine;
+    auto url = testFileUrl("setSourceAndCheckStatus.qml");
+    engine.load(url);
+    auto root = engine.rootObjects().at(0);
+    QVERIFY(root);
+
+    QQuickLoader *loader = root->findChild<QQuickLoader *>();
+    QMetaObject::invokeMethod(loader, "load", Q_ARG(QVariant, QVariant::fromValue(QStringLiteral("./RedRect.qml"))));
+    QCOMPARE(loader->status(), QQuickLoader::Ready);
+
+    QMetaObject::invokeMethod(loader, "load", Q_ARG(QVariant, QVariant::fromValue(QStringLiteral(""))));
+    QCOMPARE(loader->status(), QQuickLoader::Null);
+
+    QMetaObject::invokeMethod(loader, "load", Q_ARG(QVariant, QVariant()));
+    QCOMPARE(loader->status(), QQuickLoader::Null);
 }
 
 QTEST_MAIN(tst_QQuickLoader)

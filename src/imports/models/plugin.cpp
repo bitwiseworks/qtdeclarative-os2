@@ -37,10 +37,8 @@
 **
 ****************************************************************************/
 
+#include <QtQmlModels/private/qtqmlmodelsglobal_p.h>
 #include <QtQml/qqmlextensionplugin.h>
-#include <QtQml/qqml.h>
-
-#include <private/qqmlmodelsmodule_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -59,26 +57,37 @@ QT_BEGIN_NAMESPACE
     import QtQml.Models 2.\1
     \endqml
 
-    Note that QtQml.Models module started at version 2.1 to match the version
+    \note QtQml.Models module started at version 2.1 to match the version
     of the parent module, \l{Qt QML}.
+
+    In addition, Qt.labs.qmlmodels provides experimental QML types for models.
+    To use these experimental types, import the module with the following line:
+
+    \qml
+    import Qt.labs.qmlmodels 1.0
+    \endqml
+
+    \section1 QML Types
+    \generatelist qmltypesbymodule QtQml.Models
+
+    \section1 Experimental QML Types
+    \generatelist qmltypesbymodule Qt.labs.qmlmodels
+
+    \noautolist
 */
 
 
 
 //![class decl]
-class QtQmlModelsPlugin : public QQmlExtensionPlugin
+class QtQmlModelsPlugin : public QQmlEngineExtensionPlugin
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID QQmlExtensionInterface_iid)
+    Q_PLUGIN_METADATA(IID QQmlEngineExtensionInterface_iid)
 public:
-    QtQmlModelsPlugin(QObject *parent = nullptr) : QQmlExtensionPlugin(parent) { }
-    void registerTypes(const char *uri) override
+    QtQmlModelsPlugin(QObject *parent = nullptr) : QQmlEngineExtensionPlugin(parent)
     {
-        Q_ASSERT(QLatin1String(uri) == QLatin1String("QtQml.Models"));
-        QQmlModelsModule::defineModule();
-
-        // Auto-increment the import to stay in sync with ALL future QtQuick minor versions from 5.11 onward
-        qmlRegisterModule(uri, 2, QT_VERSION_MINOR);
+        volatile auto registration = &qml_register_types_QtQml_Models;
+        Q_UNUSED(registration);
     }
 };
 //![class decl]

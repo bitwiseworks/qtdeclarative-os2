@@ -50,7 +50,6 @@
 #include <private/qqmldebugconnector_p.h>
 #include <private/qquickprofiler_p.h>
 #include <private/qqmldebugserviceinterfaces_p.h>
-#include <private/qqmlmemoryprofiler_p.h>
 
 #include <QtQml/qqmlengine.h>
 #include <private/qqmlengine_p.h>
@@ -108,6 +107,7 @@ void QQuickWidgetPrivate::init(QQmlEngine* e)
     renderControl = new QQuickWidgetRenderControl(q);
     offscreenWindow = new QQuickWindow(*new QQuickOffcreenWindowPrivate(),renderControl);
     offscreenWindow->setTitle(QString::fromLatin1("Offscreen"));
+    offscreenWindow->setObjectName(QString::fromLatin1("QQuickOffScreenWindow"));
     // Do not call create() on offscreenWindow.
 
     // Check if the Software Adaptation is being used
@@ -129,12 +129,13 @@ void QQuickWidgetPrivate::init(QQmlEngine* e)
     if (!engine.isNull() && !engine.data()->incubationController())
         engine.data()->setIncubationController(offscreenWindow->incubationController());
 
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     q->setAcceptDrops(true);
 #endif
 
     QWidget::connect(offscreenWindow, SIGNAL(sceneGraphInitialized()), q, SLOT(createFramebufferObject()));
     QWidget::connect(offscreenWindow, SIGNAL(sceneGraphInvalidated()), q, SLOT(destroyFramebufferObject()));
+    QWidget::connect(offscreenWindow, &QQuickWindow::focusObjectChanged, q, &QQuickWidget::propagateFocusObjectChanged);
     QObject::connect(renderControl, SIGNAL(renderRequested()), q, SLOT(triggerUpdate()));
     QObject::connect(renderControl, SIGNAL(sceneChanged()), q, SLOT(triggerUpdate()));
 }
@@ -252,7 +253,6 @@ void QQuickWidgetPrivate::execute()
         component = nullptr;
     }
     if (!source.isEmpty()) {
-        QML_MEMORY_SCOPE_URL(engine.data()->baseUrl().resolved(source));
         component = new QQmlComponent(engine.data(), source, q);
         if (!component->isLoading()) {
             q->continueExecute();
@@ -285,7 +285,16 @@ void QQuickWidgetPrivate::render(bool needsSync)
 
         Q_ASSERT(context);
 
-        if (!context->makeCurrent(offscreenSurface)) {
+        bool current = context->makeCurrent(offscreenSurface);
+
+        if (!current && !context->isValid()) {
+            renderControl->invalidate();
+            current = context->create() && context->makeCurrent(offscreenSurface);
+            if (current)
+                renderControl->initialize(context);
+        }
+
+        if (!current) {
             qWarning("QQuickWidget: Cannot render due to failing makeCurrent()");
             return;
         }
@@ -518,7 +527,7 @@ QImage QQuickWidgetPrivate::grabFramebuffer()
 
 */
 QQuickWidget::QQuickWidget(QWidget *parent)
-: QWidget(*(new QQuickWidgetPrivate), parent, nullptr)
+    : QWidget(*(new QQuickWidgetPrivate), parent, {})
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -546,7 +555,7 @@ QQuickWidget::QQuickWidget(const QUrl &source, QWidget *parent)
   \sa Status, status(), errors()
 */
 QQuickWidget::QQuickWidget(QQmlEngine* engine, QWidget *parent)
-    : QWidget(*(new QQuickWidgetPrivate), parent, nullptr)
+    : QWidget(*(new QQuickWidgetPrivate), parent, {})
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -682,7 +691,7 @@ QQmlContext* QQuickWidget::rootContext() const
     connected to the signal, the behavior will be different: Quick will print
     the \a message, or show a message box, and terminate the application.
 
-    This signal will be emitted from the gui thread.
+    This signal will be emitted from the GUI thread.
 
     \sa QQuickWindow::sceneGraphError()
  */
@@ -795,15 +804,29 @@ void QQuickWidgetPrivate::updateSize()
             q->updateGeometry();
         }
     } else if (resizeMode == QQuickWidget::SizeRootObjectToView) {
-        bool needToUpdateWidth = !qFuzzyCompare(q->width(), root->width());
-        bool needToUpdateHeight = !qFuzzyCompare(q->height(), root->height());
+        const bool needToUpdateWidth = !qFuzzyCompare(q->width(), root->width());
+        const bool needToUpdateHeight = !qFuzzyCompare(q->height(), root->height());
 
-        if (needToUpdateWidth && needToUpdateHeight)
-            root->setSize(QSizeF(q->width(), q->height()));
-        else if (needToUpdateWidth)
-            root->setWidth(q->width());
-        else if (needToUpdateHeight)
-            root->setHeight(q->height());
+        if (needToUpdateWidth && needToUpdateHeight) {
+            // Make sure that we have realistic sizing behavior by following
+            // what on-screen windows would do and resize everything, not just
+            // the root item. We do this because other types may be relying on
+            // us to behave correctly.
+            const QSizeF newSize(q->width(), q->height());
+            offscreenWindow->resize(newSize.toSize());
+            offscreenWindow->contentItem()->setSize(newSize);
+            root->setSize(newSize);
+        } else if (needToUpdateWidth) {
+            const int newWidth = q->width();
+            offscreenWindow->setWidth(newWidth);
+            offscreenWindow->contentItem()->setWidth(newWidth);
+            root->setWidth(newWidth);
+        } else if (needToUpdateHeight) {
+            const int newHeight = q->height();
+            offscreenWindow->setHeight(newHeight);
+            offscreenWindow->contentItem()->setHeight(newHeight);
+            root->setHeight(newHeight);
+        }
     }
 }
 
@@ -841,13 +864,13 @@ QSize QQuickWidgetPrivate::rootObjectSize() const
     return rootObjectSize;
 }
 
-void QQuickWidgetPrivate::handleContextCreationFailure(const QSurfaceFormat &format, bool isEs)
+void QQuickWidgetPrivate::handleContextCreationFailure(const QSurfaceFormat &format)
 {
     Q_Q(QQuickWidget);
 
     QString translatedMessage;
     QString untranslatedMessage;
-    QQuickWindowPrivate::contextCreationFailureMessage(format, &translatedMessage, &untranslatedMessage, isEs);
+    QQuickWindowPrivate::contextCreationFailureMessage(format, &translatedMessage, &untranslatedMessage);
 
     static const QMetaMethod errorSignal = QMetaMethod::fromSignal(&QQuickWidget::sceneGraphError);
     const bool signalConnected = q->isSignalConnected(errorSignal);
@@ -878,7 +901,9 @@ void QQuickWidgetPrivate::createContext()
 
         context = new QOpenGLContext;
         context->setFormat(offscreenWindow->requestedFormat());
-
+        const QWindow *win = q->window()->windowHandle();
+        if (win && win->screen())
+            context->setScreen(win->screen());
         QOpenGLContext *shareContext = qt_gl_global_share_context();
         if (!shareContext)
             shareContext = QWidgetPrivate::get(q->window())->shareContext();
@@ -887,10 +912,9 @@ void QQuickWidgetPrivate::createContext()
             context->setScreen(shareContext->screen());
         }
         if (!context->create()) {
-            const bool isEs = context->isOpenGLES();
             delete context;
             context = nullptr;
-            handleContextCreationFailure(offscreenWindow->requestedFormat(), isEs);
+            handleContextCreationFailure(offscreenWindow->requestedFormat());
             return;
         }
 
@@ -966,7 +990,11 @@ void QQuickWidget::createFramebufferObject()
         d->offscreenSurface->create();
     }
 
-    context->makeCurrent(d->offscreenSurface);
+    bool current = context->makeCurrent(d->offscreenSurface);
+    if (!current) {
+        qWarning("QQuickWidget: Failed to make context current when creating FBO");
+        return;
+    }
 
     int samples = d->requestedSamples;
     if (!QOpenGLExtensions(context).hasOpenGLExtension(QOpenGLExtensions::FramebufferMultisample))
@@ -1087,14 +1115,14 @@ void QQuickWidgetPrivate::setRootObject(QObject *obj)
         root = sgItem;
         sgItem->setParentItem(offscreenWindow->contentItem());
     } else if (qobject_cast<QWindow *>(obj)) {
-        qWarning() << "QQuickWidget does not support using windows as a root item." << endl
-                   << endl
-                   << "If you wish to create your root window from QML, consider using QQmlApplicationEngine instead." << endl;
+        qWarning() << "QQuickWidget does not support using windows as a root item." << Qt::endl
+                   << Qt::endl
+                   << "If you wish to create your root window from QML, consider using QQmlApplicationEngine instead." << Qt::endl;
     } else {
-        qWarning() << "QQuickWidget only supports loading of root objects that derive from QQuickItem." << endl
-                   << endl
-                   << "Ensure your QML code is written for QtQuick 2, and uses a root that is or" << endl
-                   << "inherits from QtQuick's Item (not a Timer, QtObject, etc)." << endl;
+        qWarning() << "QQuickWidget only supports loading of root objects that derive from QQuickItem." << Qt::endl
+                   << Qt::endl
+                   << "Ensure your QML code is written for QtQuick 2, and uses a root that is or" << Qt::endl
+                   << "inherits from QtQuick's Item (not a Timer, QtObject, etc)." << Qt::endl;
         delete obj;
         root = nullptr;
     }
@@ -1120,6 +1148,13 @@ GLuint QQuickWidgetPrivate::textureId() const
     }
     return resolvedFbo ? resolvedFbo->texture()
         : (fbo ? fbo->texture() : 0);
+}
+
+QPlatformTextureList::Flags QQuickWidgetPrivate::textureListFlags()
+{
+    QPlatformTextureList::Flags flags = QWidgetPrivate::textureListFlags();
+    flags |= QPlatformTextureList::NeedsPremultipliedAlphaBlending;
+    return flags;
 }
 #endif
 
@@ -1465,6 +1500,9 @@ bool QQuickWidget::event(QEvent *e)
         // Touch events only have local and global positions, no need to map.
         return QCoreApplication::sendEvent(d->offscreenWindow, e);
 
+    case QEvent::FocusAboutToChange:
+        return QCoreApplication::sendEvent(d->offscreenWindow, e);
+
     case QEvent::InputMethod:
         return QCoreApplication::sendEvent(d->offscreenWindow->focusObject(), e);
     case QEvent::InputMethodQuery:
@@ -1535,7 +1573,7 @@ bool QQuickWidget::event(QEvent *e)
     return QWidget::event(e);
 }
 
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
 
 /*! \reimp */
 void QQuickWidget::dragEnterEvent(QDragEnterEvent *e)
@@ -1570,7 +1608,7 @@ void QQuickWidget::dropEvent(QDropEvent *e)
     d->offscreenWindow->event(e);
 }
 
-#endif // draganddrop
+#endif // quick_draganddrop
 
 // TODO: try to separate the two cases of
 // 1. render() unconditionally without sync
@@ -1706,6 +1744,15 @@ void QQuickWidget::paintEvent(QPaintEvent *event)
             }
         }
     }
+}
+
+void QQuickWidget::propagateFocusObjectChanged(QObject *focusObject)
+{
+    Q_D(QQuickWidget);
+    if (QApplication::focusObject() != this)
+        return;
+    if (QWindow *window = d->windowHandle(QWidgetPrivate::WindowHandleMode::TopLevel))
+        emit window->focusObjectChanged(focusObject);
 }
 
 QT_END_NAMESPACE

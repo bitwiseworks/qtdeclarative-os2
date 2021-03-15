@@ -64,10 +64,11 @@ class HappyBirthdaySong : public QObject, public QQmlPropertyValueSource
 // ![0]
     Q_PROPERTY(QString name READ name WRITE setName)
 // ![1]
+    QML_ELEMENT
 public:
-    HappyBirthdaySong(QObject *parent = 0);
+    HappyBirthdaySong(QObject *parent = nullptr);
 
-    virtual void setTarget(const QQmlProperty &);
+    void setTarget(const QQmlProperty &) override;
 // ![1]
 
     QString name() const;

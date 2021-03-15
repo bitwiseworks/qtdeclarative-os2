@@ -83,6 +83,7 @@ class Q_QUICKPARTICLES_PRIVATE_EXPORT QQuickParticleEmitter : public QQuickItem
     Q_PROPERTY(QQuickDirection *velocity READ velocity WRITE setVelocity NOTIFY velocityChanged)
     Q_PROPERTY(QQuickDirection *acceleration READ acceleration WRITE setAcceleration NOTIFY accelerationChanged)
     Q_PROPERTY(qreal velocityFromMovement READ velocityFromMovement WRITE setVelocityFromMovement NOTIFY velocityFromMovementChanged)
+    QML_NAMED_ELEMENT(Emitter)
 
 public:
     explicit QQuickParticleEmitter(QQuickItem *parent = 0);
@@ -135,7 +136,7 @@ public:
     void setVelocityFromMovement(qreal s);
     void componentComplete() override;
 Q_SIGNALS:
-    void emitParticles(QQmlV4Handle particles);
+    void emitParticles(const QJSValue &particles);
     void particlesPerSecondChanged(qreal);
     void particleDurationChanged(int);
     void enabledChanged(bool);

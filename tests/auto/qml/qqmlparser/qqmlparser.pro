@@ -7,3 +7,8 @@ SOURCES += tst_qqmlparser.cpp
 DEFINES += SRCDIR=\\\"$$PWD\\\"
 
 cross_compile: DEFINES += QTEST_CROSS_COMPILED
+
+TESTDATA = data/*
+
+include (../../shared/util.pri)
+include (../../shared/astdump.pri)

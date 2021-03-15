@@ -178,7 +178,7 @@ void QQuickCustomMaterialShader::updateState(const RenderState &state, QSGMateri
                 if (state.isMatrixDirty())
                     program()->setUniformValue(loc, state.combinedMatrix());
             } else if (d.specialType == UniformData::None) {
-                switch (int(d.value.type())) {
+                switch (int(d.value.userType())) {
                 case QMetaType::QColor:
                     program()->setUniformValue(loc, qt_premultiply_color(qvariant_cast<QColor>(d.value)));
                     break;
@@ -366,7 +366,6 @@ class QQuickOpenGLShaderEffectMaterialCache : public QObject
 public:
     static QQuickOpenGLShaderEffectMaterialCache *get(bool create = true) {
         QOpenGLContext *ctx = QOpenGLContext::currentContext();
-        Q_ASSERT(ctx);
         QQuickOpenGLShaderEffectMaterialCache *me = ctx->findChild<QQuickOpenGLShaderEffectMaterialCache *>(QStringLiteral("__qt_ShaderEffectCache"), Qt::FindDirectChildrenOnly);
         if (!me && create) {
             me = new QQuickOpenGLShaderEffectMaterialCache();

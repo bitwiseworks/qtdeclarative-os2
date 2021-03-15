@@ -74,6 +74,8 @@ private slots:
     void aliasedProperty();
     void innerBehaviorOverwritten();
     void oneWay();
+    void safeToDelete();
+    void targetProperty();
 };
 
 void tst_qquickbehaviors::simpleBehavior()
@@ -646,6 +648,37 @@ void tst_qquickbehaviors::oneWay()
     QTRY_COMPARE(myRect->x(), qreal(0));
     QCOMPARE(myAnimation->isRunning(), false);
 }
+
+// QTBUG-76749
+void tst_qquickbehaviors::safeToDelete()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("delete.qml"));
+    QVERIFY(c.create());
+}
+
+Q_DECLARE_METATYPE(QQmlProperty)
+void tst_qquickbehaviors::targetProperty()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("targetProperty.qml"));
+    QScopedPointer<QQuickItem> item(qobject_cast<QQuickItem*>(c.create()));
+    QVERIFY2(!item.isNull(), qPrintable(c.errorString()));
+
+    QQuickBehavior* xBehavior =
+        qobject_cast<QQuickBehavior*>(item->findChild<QQuickBehavior*>("xBehavior"));
+    QCOMPARE(xBehavior->property("targetProperty").value<QQmlProperty>(), QQmlProperty(item.data(), "x"));
+    QCOMPARE(item->property("xBehaviorObject").value<QObject*>(), item.data());
+    QCOMPARE(item->property("xBehaviorName").toString(), "x");
+
+    QQuickBehavior* emptyBehavior =
+        qobject_cast<QQuickBehavior*>(item->findChild<QQuickBehavior*>("emptyBehavior"));
+    QCOMPARE(emptyBehavior->property("targetProperty").value<QQmlProperty>().isValid(), false);
+    QCOMPARE(item->property("emptyBehaviorObject").value<QObject*>(), nullptr);
+    QCOMPARE(item->property("emptyBehaviorName").toString(), "");
+}
+
+
 
 QTEST_MAIN(tst_qquickbehaviors)
 

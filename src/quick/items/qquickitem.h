@@ -58,6 +58,7 @@ class QQuickTransformPrivate;
 class Q_QUICK_EXPORT QQuickTransform : public QObject
 {
     Q_OBJECT
+    QML_ANONYMOUS
 public:
     explicit QQuickTransform(QObject *parent = nullptr);
     ~QQuickTransform() override;
@@ -150,6 +151,7 @@ class Q_QUICK_EXPORT QQuickItem : public QObject, public QQmlParserStatus
 
     Q_CLASSINFO("DefaultProperty", "data")
     Q_CLASSINFO("qt_QmlJSWrapperFactoryMethod", "_q_createJSWrapper(QV4::ExecutionEngine*)")
+    QML_NAMED_ELEMENT(Item)
 
 public:
     enum Flag {
@@ -318,7 +320,7 @@ public:
     void setKeepTouchGrab(bool);
 
     // implemented in qquickitemgrabresult.cpp
-    Q_REVISION(2) Q_INVOKABLE bool grabToImage(const QJSValue &callback, const QSize &targetSize = QSize());
+    Q_REVISION(4) Q_INVOKABLE bool grabToImage(const QJSValue &callback, const QSize &targetSize = QSize());
     QSharedPointer<QQuickItemGrabResult> grabToImage(const QSize &targetSize = QSize());
 
     Q_INVOKABLE virtual bool contains(const QPointF &point) const;
@@ -433,7 +435,7 @@ protected:
     virtual void hoverEnterEvent(QHoverEvent *event);
     virtual void hoverMoveEvent(QHoverEvent *event);
     virtual void hoverLeaveEvent(QHoverEvent *event);
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     virtual void dragEnterEvent(QDragEnterEvent *);
     virtual void dragMoveEvent(QDragMoveEvent *);
     virtual void dragLeaveEvent(QDragLeaveEvent *);

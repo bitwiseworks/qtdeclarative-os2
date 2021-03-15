@@ -51,6 +51,7 @@ StateMachine::StateMachine(QObject *parent)
     : QStateMachine(parent), m_completed(false), m_running(false)
 {
     connect(this, SIGNAL(runningChanged(bool)), SIGNAL(qmlRunningChanged()));
+    connect(this, SIGNAL(childModeChanged()), SLOT(checkChildMode()));
 }
 
 bool StateMachine::isRunning() const
@@ -64,6 +65,15 @@ void StateMachine::setRunning(bool running)
         QStateMachine::setRunning(running);
     else
         m_running = running;
+}
+
+void StateMachine::checkChildMode()
+{
+    if (childMode() != QState::ExclusiveStates) {
+        qmlWarning(this) << "Setting the childMode of a StateMachine to anything else than\n"
+                            "QState.ExclusiveStates will result in an invalid state machine,\n"
+                            "and can lead to incorrect behavior!";
+    }
 }
 
 void StateMachine::componentComplete()
@@ -80,7 +90,9 @@ void StateMachine::componentComplete()
 
 QQmlListProperty<QObject> StateMachine::children()
 {
-    return QQmlListProperty<QObject>(this, &m_children, m_children.append, m_children.count, m_children.at, m_children.clear);
+    return QQmlListProperty<QObject>(this, &m_children,
+                                     m_children.append, m_children.count, m_children.at,
+                                     m_children.clear, m_children.replace, m_children.removeLast);
 }
 
 /*!
@@ -128,6 +140,9 @@ QQmlListProperty<QObject> StateMachine::children()
     stop when the error state is entered.  If no error state applies to the
     erroneous state, the machine will stop executing and an error message will
     be printed to the console.
+
+    \warning Setting the childMode of a StateMachine to anything else than QState::ExclusiveStates
+    will result in an invalid state machine, and can lead to incorrect behavior.
 
     \clearfloat
 
@@ -196,8 +211,6 @@ QQmlListProperty<QObject> StateMachine::children()
     This signal is emitted when the state machine has entered its initial state
     (State::initialState).
 
-    The corresponding handler is \c onStarted.
-
     \sa running, start(), State::finished
 */
 
@@ -214,8 +227,6 @@ QQmlListProperty<QObject> StateMachine::children()
     \qmlsignal StateMachine::stopped()
 
     This signal is emitted when the state machine has stopped.
-
-    The corresponding handler is \c onStopped.
 
     \sa running, stop(), State::finished
 */

@@ -37,6 +37,7 @@
 **
 ****************************************************************************/
 
+#include <QtQml/qqmlfile.h>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTranslator>
 #include <QQmlComponent>
@@ -49,6 +50,7 @@ QT_BEGIN_NAMESPACE
 QQmlApplicationEnginePrivate::QQmlApplicationEnginePrivate(QQmlEngine *e)
     : QQmlEnginePrivate(e)
 {
+    uiLanguage = QLocale().bcp47Name();
 }
 
 QQmlApplicationEnginePrivate::~QQmlApplicationEnginePrivate()
@@ -62,9 +64,6 @@ void QQmlApplicationEnginePrivate::cleanUp()
         obj->disconnect(q);
 
     qDeleteAll(objects);
-#if QT_CONFIG(translation)
-    qDeleteAll(translators);
-#endif
 }
 
 void QQmlApplicationEnginePrivate::init()
@@ -74,33 +73,39 @@ void QQmlApplicationEnginePrivate::init()
                &QCoreApplication::quit, Qt::QueuedConnection);
     q->connect(q, &QQmlApplicationEngine::exit, QCoreApplication::instance(),
                &QCoreApplication::exit, Qt::QueuedConnection);
+    q->connect(q, SIGNAL(uiLanguageChanged()), q_func(), SLOT(_q_loadTranslations()));
 #if QT_CONFIG(translation)
-    QTranslator* qtTranslator = new QTranslator;
+    QTranslator* qtTranslator = new QTranslator(q);
     if (qtTranslator->load(QLocale(), QLatin1String("qt"), QLatin1String("_"), QLibraryInfo::location(QLibraryInfo::TranslationsPath), QLatin1String(".qm")))
         QCoreApplication::installTranslator(qtTranslator);
-    translators << qtTranslator;
+    else
+        delete qtTranslator;
 #endif
     new QQmlFileSelector(q,q);
     QCoreApplication::instance()->setProperty("__qml_using_qqmlapplicationengine", QVariant(true));
 }
 
-void QQmlApplicationEnginePrivate::loadTranslations(const QUrl &rootFile)
+void QQmlApplicationEnginePrivate::_q_loadTranslations()
 {
 #if QT_CONFIG(translation)
-    if (rootFile.scheme() != QLatin1String("file") && rootFile.scheme() != QLatin1String("qrc"))
+    if (translationsDirectory.isEmpty())
         return;
 
-    QFileInfo fi(QQmlFile::urlToLocalFileOrQrc(rootFile));
+    Q_Q(QQmlApplicationEngine);
 
-    QTranslator *translator = new QTranslator;
-    if (translator->load(QLocale(), QLatin1String("qml"), QLatin1String("_"), fi.path() + QLatin1String("/i18n"), QLatin1String(".qm"))) {
-        QCoreApplication::installTranslator(translator);
-        translators << translator;
+    QScopedPointer<QTranslator> translator(new QTranslator);
+    if (!uiLanguage.isEmpty()) {
+        QLocale locale(uiLanguage);
+        if (translator->load(locale, QLatin1String("qml"), QLatin1String("_"), translationsDirectory, QLatin1String(".qm"))) {
+            if (activeTranslator)
+                QCoreApplication::removeTranslator(activeTranslator.data());
+            QCoreApplication::installTranslator(translator.data());
+            activeTranslator.swap(translator);
+        }
     } else {
-        delete translator;
+        activeTranslator.reset();
     }
-#else
-    Q_UNUSED(rootFile)
+    q->retranslate();
 #endif
 }
 
@@ -108,7 +113,14 @@ void QQmlApplicationEnginePrivate::startLoad(const QUrl &url, const QByteArray &
 {
     Q_Q(QQmlApplicationEngine);
 
-    loadTranslations(url); //Translations must be loaded before the QML file is
+    if (url.scheme() == QLatin1String("file") || url.scheme() == QLatin1String("qrc")) {
+        QFileInfo fi(QQmlFile::urlToLocalFileOrQrc(url));
+        translationsDirectory = fi.path() + QLatin1String("/i18n");
+    } else {
+        translationsDirectory.clear();
+    }
+
+    _q_loadTranslations(); //Translations must be loaded before the QML file is
     QQmlComponent *c = new QQmlComponent(q, q);
 
     if (dataFlag)
@@ -129,11 +141,11 @@ void QQmlApplicationEnginePrivate::finishLoad(QQmlComponent *c)
     switch (c->status()) {
     case QQmlComponent::Error:
         qWarning() << "QQmlApplicationEngine failed to load component";
-        qWarning() << qPrintable(c->errorString());
+        warning(c->errors());
         q->objectCreated(nullptr, c->url());
         break;
     case QQmlComponent::Ready: {
-        auto newObj = c->create();
+        auto newObj = initialProperties.empty() ? c->create() : c->createWithInitialProperties(initialProperties);
         objects << newObj;
         QObject::connect(newObj, &QObject::destroyed, q, [&](QObject *obj) { objects.removeAll(obj); });
         q->objectCreated(objects.constLast(), c->url());
@@ -183,6 +195,7 @@ void QQmlApplicationEnginePrivate::finishLoad(QQmlComponent *c)
       \list
           \li Translation files must have "qml_" prefix e.g. qml_ja_JP.qm.
       \endlist
+  \li Translations are reloaded when the \c QJSEngine::uiLanguage / \c Qt.uiLanguage property is changed.
   \li Automatically sets an incubation controller if the scene contains a QQuickWindow.
   \li Automatically sets a \c QQmlFileSelector as the url interceptor, applying file selectors to all
   QML files and assets.
@@ -278,6 +291,33 @@ void QQmlApplicationEngine::load(const QString &filePath)
 {
     Q_D(QQmlApplicationEngine);
     d->startLoad(QUrl::fromUserInput(filePath, QLatin1String("."), QUrl::AssumeLocalFile));
+}
+
+/*!
+   Sets the \a initialProperties with which the QML component gets initialized after
+   it gets loaded.
+
+   \code
+    QQmlApplicationEngine engine;
+
+    EventDatabase eventDatabase;
+    EventMonitor eventMonitor;
+
+    engine.setInitialProperties({
+        { "eventDatabase", QVariant::fromValue(&eventDatabase) },
+        { "eventMonitor", QVariant::fromValue(&eventMonitor) }
+    });
+   \endcode
+
+   \sa QQmlComponent::setInitialProperties
+   \sa QQmlApplicationEngine::load
+   \sa QQmlApplicationEngine::loadData
+   \since 5.14
+*/
+void QQmlApplicationEngine::setInitialProperties(const QVariantMap &initialProperties)
+{
+    Q_D(QQmlApplicationEngine);
+    d->initialProperties = initialProperties;
 }
 
 /*!

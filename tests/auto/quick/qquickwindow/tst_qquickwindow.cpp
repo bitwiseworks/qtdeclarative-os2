@@ -73,7 +73,7 @@ static QTouchEvent::TouchPoint makeTouchPoint(QQuickItem *item, const QPointF &p
     return tp;
 }
 
-static TouchEventData makeTouchData(QEvent::Type type, QWindow *w, Qt::TouchPointStates states = nullptr,
+static TouchEventData makeTouchData(QEvent::Type type, QWindow *w, Qt::TouchPointStates states = {},
                                     const QList<QTouchEvent::TouchPoint>& touchPoints = QList<QTouchEvent::TouchPoint>())
 {
     TouchEventData d = { type, nullptr, w, states, touchPoints };
@@ -157,7 +157,7 @@ public:
         setEnabled(true);
         setVisible(true);
 
-        lastEvent = makeTouchData(QEvent::None, window(), nullptr, QList<QTouchEvent::TouchPoint>());//CHECK_VALID
+        lastEvent = makeTouchData(QEvent::None, window(), {}, QList<QTouchEvent::TouchPoint>());//CHECK_VALID
 
         lastVelocity = lastVelocityFromMouseMove = QVector2D();
         lastMousePos = QPointF();
@@ -481,6 +481,10 @@ private slots:
     void testChildMouseEventFilter();
     void testChildMouseEventFilter_data();
     void cleanupGrabsOnRelease();
+
+#if QT_CONFIG(shortcut)
+    void testShortCut();
+#endif
 
 private:
     QTouchDevice *touchDevice;
@@ -1477,7 +1481,7 @@ void tst_qquickwindow::grab()
 {
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
     QFETCH(bool, visible);
     QFETCH(bool, alpha);
@@ -1793,22 +1797,26 @@ void tst_qquickwindow::cursor()
     window.resize(320, 290);
 
     QQuickItem parentItem;
+    parentItem.setObjectName("parentItem");
     parentItem.setPosition(QPointF(0, 0));
     parentItem.setSize(QSizeF(180, 180));
     parentItem.setParentItem(window.contentItem());
 
     QQuickItem childItem;
+    childItem.setObjectName("childItem");
     childItem.setPosition(QPointF(60, 90));
     childItem.setSize(QSizeF(120, 120));
     childItem.setParentItem(&parentItem);
 
     QQuickItem clippingItem;
+    clippingItem.setObjectName("clippingItem");
     clippingItem.setPosition(QPointF(120, 120));
     clippingItem.setSize(QSizeF(180, 180));
     clippingItem.setClip(true);
     clippingItem.setParentItem(window.contentItem());
 
     QQuickItem clippedItem;
+    clippedItem.setObjectName("clippedItem");
     clippedItem.setPosition(QPointF(-30, -30));
     clippedItem.setSize(QSizeF(120, 120));
     clippedItem.setParentItem(&clippingItem);
@@ -2078,7 +2086,7 @@ void tst_qquickwindow::requestActivate()
         QString warning = QString::fromLatin1("Mouse event MousePress not accepted by receiving window");
         QWARN(warning.toLatin1().data());
     }
-    me = QMouseEvent(QEvent::MouseButtonPress, pos, window1->mapToGlobal(pos), Qt::LeftButton, nullptr, Qt::NoModifier);
+    me = QMouseEvent(QEvent::MouseButtonPress, pos, window1->mapToGlobal(pos), Qt::LeftButton, {}, Qt::NoModifier);
     QSpontaneKeyEvent::setSpontaneous(&me);
     if (!qApp->notify(window1.data(), &me)) {
         QString warning = QString::fromLatin1("Mouse event MouseRelease not accepted by receiving window");
@@ -2531,7 +2539,7 @@ void tst_qquickwindow::testRenderJob()
         QTRY_COMPARE(RenderJob::deleted, 1);
         if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
             || (QGuiApplication::platformName() == QLatin1String("minimal")))
-            QEXPECT_FAIL("", "NoStage job fails on offscreen/minimimal platforms", Continue);
+            QEXPECT_FAIL("", "NoStage job fails on offscreen/minimal platforms", Continue);
         QCOMPARE(completedJobs.size(), 1);
 
 #if QT_CONFIG(opengl)
@@ -2852,7 +2860,7 @@ void tst_qquickwindow::pointerEventTypeAndPointCount()
         QList<QTouchEvent::TouchPoint>() << QTouchEvent::TouchPoint(1));
 
 
-    QQuickPointerMouseEvent pme;
+    QQuickPointerMouseEvent pme(nullptr, QQuickPointerDevice::genericMouseDevice());
     pme.reset(&me);
     QCOMPARE(pme.asMouseEvent(localPosition), &me);
     QVERIFY(pme.asPointerMouseEvent());
@@ -2864,7 +2872,7 @@ void tst_qquickwindow::pointerEventTypeAndPointCount()
     QCOMPARE(pme.asMouseEvent(localPosition)->localPos(), localPosition);
     QCOMPARE(pme.asMouseEvent(localPosition)->screenPos(), screenPosition);
 
-    QQuickPointerTouchEvent pte;
+    QQuickPointerTouchEvent pte(nullptr, QQuickPointerDevice::touchDevice(touchDevice));
     pte.reset(&te);
     QCOMPARE(pte.asTouchEvent(), &te);
     QVERIFY(!pte.asPointerMouseEvent());
@@ -3578,6 +3586,30 @@ void tst_qquickwindow::cleanupGrabsOnRelease()
     QCOMPARE(child->mouseUngrabEventCount, 1);
     QCOMPARE(parent->mouseUngrabEventCount, 1);
 }
+
+#if QT_CONFIG(shortcut)
+void tst_qquickwindow::testShortCut()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.loadUrl(testFileUrl("shortcut.qml"));
+
+    QObject *created = component.create();
+    QScopedPointer<QObject> cleanup(created);
+    QVERIFY(created);
+
+    QQuickWindow *window = qobject_cast<QQuickWindow *>(created);
+    QVERIFY(QTest::qWaitForWindowActive(window));
+
+    EventFilter eventFilter;
+    window->activeFocusItem()->installEventFilter(&eventFilter);
+    //Send non-spontaneous key press event
+    QKeyEvent keyEvent(QEvent::KeyPress, Qt::Key_B, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &keyEvent);
+    QVERIFY(eventFilter.events.contains(int(QEvent::ShortcutOverride)));
+    QVERIFY(window->property("received").value<bool>());
+}
+#endif
 
 QTEST_MAIN(tst_qquickwindow)
 

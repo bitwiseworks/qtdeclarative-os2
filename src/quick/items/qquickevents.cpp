@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2017 The Qt Company Ltd.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtQuick module of the Qt Toolkit.
@@ -41,6 +41,7 @@
 #include <QtCore/qmap.h>
 #include <QtGui/private/qguiapplication_p.h>
 #include <QtGui/private/qtouchdevice_p.h>
+#include <QtGui/private/qevent_p.h>
 #include <QtQuick/private/qquickitem_p.h>
 #include <QtQuick/private/qquickpointerhandler_p.h>
 #include <QtQuick/private/qquickwindow_p.h>
@@ -447,7 +448,7 @@ Item {
 */
 
 /*!
-    \qmlproperty int QtQuick::WheelEvent::inverted
+    \qmlproperty bool QtQuick::WheelEvent::inverted
 
     Returns whether the delta values delivered with the event are inverted.
 
@@ -596,8 +597,10 @@ Q_GLOBAL_STATIC_WITH_ARGS(ConstructableQQuickPointerDevice, g_genericMouseDevice
                              QQuickPointerDevice::Position | QQuickPointerDevice::Scroll | QQuickPointerDevice::Hover,
                              1, 3, QLatin1String("core pointer"), 0))
 
+#if QT_CONFIG(tabletevent)
 typedef QHash<qint64, QQuickPointerDevice *> PointerDeviceForDeviceIdHash;
 Q_GLOBAL_STATIC(PointerDeviceForDeviceIdHash, g_tabletDevices)
+#endif
 
 // debugging helpers
 static const char *pointStateString(const QQuickEventPoint *point)
@@ -657,15 +660,76 @@ QQuickPointerDevice *QQuickPointerDevice::genericMouseDevice()
     return g_genericMouseDevice;
 }
 
-QQuickPointerDevice *QQuickPointerDevice::tabletDevice(qint64 id)
+#if QT_CONFIG(tabletevent)
+QQuickPointerDevice *QQuickPointerDevice::tabletDevice(const QTabletEvent *event)
 {
-    auto it = g_tabletDevices->find(id);
+    // QTabletEvent::uniqueId() is the same for the pointy end and the eraser end of the stylus.
+    // We need to make those unique. QTabletEvent::PointerType only needs 2 bits' worth of storage.
+    // The key into g_tabletDevices just needs to be unique; we don't need to extract uniqueId
+    // back out of it, because QQuickPointerDevice stores that separately anyway.
+    // So the shift-and-add can be thought of as a sort of hash function, even though
+    // most of the time the result will be recognizable because the uniqueId MSBs are often 0.
+    qint64 key = event->uniqueId() + (qint64(event->pointerType()) << 60);
+    auto it = g_tabletDevices->find(key);
     if (it != g_tabletDevices->end())
         return it.value();
 
-    // ### Figure out how to populate the tablet devices
-    return nullptr;
+    DeviceType type = UnknownDevice;
+    int buttonCount = 0;
+    Capabilities caps = Position | Pressure | Hover;
+    // TODO Qt 6: we can't know for sure about XTilt or YTilt until we have a
+    // QTabletDevice populated with capabilities provided by QPA plugins
+
+    switch (event->deviceType()) {
+    case QTabletEvent::Stylus:
+        type = QQuickPointerDevice::Stylus;
+        buttonCount = 3;
+        break;
+    case QTabletEvent::RotationStylus:
+        type = QQuickPointerDevice::Stylus;
+        caps |= QQuickPointerDevice::Rotation;
+        buttonCount = 1;
+        break;
+    case QTabletEvent::Airbrush:
+        type = QQuickPointerDevice::Airbrush;
+        buttonCount = 2;
+        break;
+    case QTabletEvent::Puck:
+        type = QQuickPointerDevice::Puck;
+        buttonCount = 3;
+        break;
+    case QTabletEvent::FourDMouse:
+        type = QQuickPointerDevice::Mouse;
+        caps |= QQuickPointerDevice::Rotation;
+        buttonCount = 3;
+        break;
+    default:
+        type = QQuickPointerDevice::UnknownDevice;
+        break;
+    }
+
+    PointerType ptype = GenericPointer;
+    switch (event->pointerType()) {
+    case QTabletEvent::Pen:
+        ptype = Pen;
+        break;
+    case QTabletEvent::Eraser:
+        ptype = Eraser;
+        break;
+    case QTabletEvent::Cursor:
+        ptype = Cursor;
+        break;
+    case QTabletEvent::UnknownPointer:
+        break;
+    }
+
+    QQuickPointerDevice *device = new QQuickPointerDevice(type, ptype, caps, 1, buttonCount,
+        QLatin1String("tablet tool ") + QString::number(event->uniqueId()), event->uniqueId());
+
+    g_tabletDevices->insert(key, device);
+    return device;
 }
+#endif
 
 /*!
     \qmltype EventPoint
@@ -851,7 +915,7 @@ void QQuickEventPoint::setGrabberItem(QQuickItem *grabber)
         if (oldGrabberHandler && !oldGrabberHandler->approveGrabTransition(this, grabber))
             return;
         if (Q_UNLIKELY(lcPointerGrab().isDebugEnabled())) {
-            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << hex << m_pointId << pointStateString(this) << "@" << m_scenePos
+            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << Qt::hex << m_pointId << pointStateString(this) << "@" << m_scenePos
                                    << ": grab" << m_exclusiveGrabber << "->" << grabber;
         }
         QQuickItem *oldGrabberItem = grabberItem();
@@ -892,10 +956,10 @@ void QQuickEventPoint::setGrabberPointerHandler(QQuickPointerHandler *grabber, b
     if (Q_UNLIKELY(lcPointerGrab().isDebugEnabled())) {
         if (exclusive) {
             if (m_exclusiveGrabber != grabber)
-                qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << hex << m_pointId << pointStateString(this)
+                qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << Qt::hex << m_pointId << pointStateString(this)
                                        << ": grab (exclusive)" << m_exclusiveGrabber << "->" << grabber;
         } else {
-            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << hex << m_pointId << pointStateString(this)
+            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << Qt::hex << m_pointId << pointStateString(this)
                                    << ": grab (passive)" << grabber;
         }
     }
@@ -958,7 +1022,7 @@ void QQuickEventPoint::cancelExclusiveGrabImpl(QTouchEvent *cancelEvent)
     if (m_exclusiveGrabber.isNull())
         return;
     if (Q_UNLIKELY(lcPointerGrab().isDebugEnabled())) {
-        qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << hex << m_pointId << pointStateString(this)
+        qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << Qt::hex << m_pointId << pointStateString(this)
                                << ": grab (exclusive)" << m_exclusiveGrabber << "-> nullptr";
     }
     if (auto handler = grabberPointerHandler()) {
@@ -981,7 +1045,7 @@ void QQuickEventPoint::cancelPassiveGrab(QQuickPointerHandler *handler)
 {
     if (removePassiveGrabber(handler)) {
         if (Q_UNLIKELY(lcPointerGrab().isDebugEnabled())) {
-            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << hex << m_pointId << pointStateString(this)
+            qCDebug(lcPointerGrab) << pointDeviceName(this) << "point" << Qt::hex << m_pointId << pointStateString(this)
                                    << ": grab (passive)" << handler << "removed";
         }
         handler->onGrabChanged(handler, CancelGrabPassive, this);
@@ -1283,6 +1347,12 @@ QVector2D QQuickEventPoint::estimatedVelocity() const
 QQuickPointerEvent::~QQuickPointerEvent()
 {}
 
+QQuickPointerMouseEvent::QQuickPointerMouseEvent(QObject *parent, QQuickPointerDevice *device)
+    : QQuickSinglePointEvent(parent, device)
+{
+    m_point = new QQuickEventPoint(this);
+}
+
 QQuickPointerEvent *QQuickPointerMouseEvent::reset(QEvent *event)
 {
     auto ev = static_cast<QMouseEvent*>(event);
@@ -1397,6 +1467,12 @@ void QQuickPointerTouchEvent::localize(QQuickItem *target)
 }
 
 #if QT_CONFIG(gestures)
+QQuickPointerNativeGestureEvent::QQuickPointerNativeGestureEvent(QObject *parent, QQuickPointerDevice *device)
+    : QQuickSinglePointEvent(parent, device)
+{
+    m_point = new QQuickEventPoint(this);
+}
+
 QQuickPointerEvent *QQuickPointerNativeGestureEvent::reset(QEvent *event)
 {
     auto ev = static_cast<QNativeGestureEvent*>(event);
@@ -1430,6 +1506,141 @@ QQuickEventPoint *QQuickSinglePointEvent::point(int i) const
     return nullptr;
 }
 
+
+/*!
+    \qmltype PointerScrollEvent
+    \instantiates QQuickPointerScrollEvent
+    \inqmlmodule QtQuick
+    \ingroup qtquick-input-events
+    \brief Provides information about a scrolling event, such as from a mouse wheel.
+
+    \sa WheelHandler
+*/
+
+/*!
+    \internal
+    \class QQuickPointerScrollEvent
+*/
+
+/*!
+    \readonly
+    \qmlproperty PointerDevice QtQuick::PointerScrollEvent::device
+
+    This property holds the device that generated the event.
+*/
+
+/*!
+    \qmlproperty int QtQuick::PointerScrollEvent::buttons
+
+    This property holds the mouse buttons pressed when the wheel event was generated.
+
+    It contains a bitwise combination of:
+    \list
+    \li \l {Qt::LeftButton} {Qt.LeftButton}
+    \li \l {Qt::RightButton} {Qt.RightButton}
+    \li \l {Qt::MiddleButton} {Qt.MiddleButton}
+    \endlist
+*/
+
+/*!
+    \readonly
+    \qmlproperty int QtQuick::PointerScrollEvent::modifiers
+
+    This property holds the \l {Qt::KeyboardModifier}{keyboard modifier} keys
+    that were pressed immediately before the event occurred.
+
+    It contains a bitwise combination of the following flags:
+    \value Qt.NoModifier
+        No modifier key is pressed.
+    \value Qt.ShiftModifier
+        A Shift key on the keyboard is pressed.
+    \value Qt.ControlModifier
+        A Ctrl key on the keyboard is pressed.
+    \value Qt.AltModifier
+        An Alt key on the keyboard is pressed.
+    \value Qt.MetaModifier
+        A Meta key on the keyboard is pressed.
+    \value Qt.KeypadModifier
+        A keypad button is pressed.
+
+    For example, to react to a Shift key + Left mouse button click:
+    \qml
+    Item {
+        TapHandler {
+            onTapped: {
+                if ((event.button == Qt.LeftButton) && (event.modifiers & Qt.ShiftModifier))
+                    doSomething();
+            }
+        }
+    }
+    \endqml
+*/
+
+/*!
+    \qmlproperty point QtQuick::PointerScrollEvent::angleDelta
+
+    This property holds the distance that the wheel is rotated in wheel degrees.
+    The x and y cordinate of this property holds the delta in horizontal and
+    vertical orientation.
+
+    A positive value indicates that the wheel was rotated up/right;
+    a negative value indicates that the wheel was rotated down/left.
+
+    Most mouse types work in steps of 15 degrees, in which case the delta value is a
+    multiple of 120; i.e., 120 units * 1/8 = 15 degrees.
+*/
+
+/*!
+    \qmlproperty point QtQuick::PointerScrollEvent::pixelDelta
+
+    This property holds the delta in screen pixels and is available in platforms that
+    have high-resolution trackpads, such as \macos.
+    The x and y coordinates of this property hold the delta in horizontal and
+    vertical orientation. The value should be used directly to scroll content on screen.
+
+    For platforms without high-resolution touchpad support, pixelDelta will
+    always be (0,0), and angleDelta should be used instead.
+*/
+
+/*!
+    \qmlproperty bool QtQuick::PointerScrollEvent::hasAngleDelta
+
+    Returns whether the \l angleDelta property has a non-null value.
+*/
+
+/*!
+    \qmlproperty bool QtQuick::PointerScrollEvent::hasPixelDelta
+
+    Returns whether the \l pixelDelta property has a non-null value.
+*/
+
+/*!
+    \qmlproperty bool QtQuick::PointerScrollEvent::inverted
+
+    Returns whether the delta values delivered with the event are inverted.
+
+    Normally, a vertical wheel will produce a PointerScrollEvent with positive delta
+    values if the top of the wheel is rotating away from the hand operating it.
+    Similarly, a horizontal wheel movement will produce a PointerScrollEvent with
+    positive delta values if the top of the wheel is moved to the left.
+
+    However, on some platforms this is configurable, so that the same
+    operations described above will produce negative delta values (but with the
+    same magnitude). In a QML component (such as a tumbler or a slider) where
+    it is appropriate to synchronize the movement or rotation of an item with
+    the direction of the wheel, regardless of the system settings, the wheel
+    event handler can use the inverted property to decide whether to negate the
+    \l angleDelta or \l pixelDelta values.
+
+    \note Many platforms provide no such information. On such platforms,
+    \c inverted always returns false.
+*/
+QQuickPointerScrollEvent::QQuickPointerScrollEvent(QObject *parent, QQuickPointerDevice *device)
+    : QQuickSinglePointEvent(parent, device)
+{
+    m_point = new QQuickEventPoint(this);
+}
+
 QQuickPointerEvent *QQuickPointerScrollEvent::reset(QEvent *event)
 {
     m_event = static_cast<QInputEvent*>(event);
@@ -1448,7 +1659,7 @@ QQuickPointerEvent *QQuickPointerScrollEvent::reset(QEvent *event)
         m_synthSource = ev->source();
         m_inverted = ev->inverted();
 
-        m_point->reset(Qt::TouchPointMoved, ev->posF(), quint64(1) << 24, ev->timestamp()); // mouse has device ID 1
+        m_point->reset(Qt::TouchPointMoved, ev->position(), quint64(1) << 24, ev->timestamp()); // mouse has device ID 1
     }
 #endif
     // TODO else if (event->type() == QEvent::Scroll) ...
@@ -1496,6 +1707,8 @@ bool QQuickSinglePointEvent::allPointsGrabbed() const
 
 QMouseEvent *QQuickPointerMouseEvent::asMouseEvent(const QPointF &localPos) const
 {
+    if (!m_event)
+        return nullptr;
     auto event = static_cast<QMouseEvent *>(m_event);
     event->setLocalPos(localPos);
     return event;
@@ -1531,6 +1744,8 @@ bool QQuickSinglePointEvent::hasExclusiveGrabber(const QQuickPointerHandler *han
 
 bool QQuickPointerMouseEvent::isPressEvent() const
 {
+    if (!m_event)
+        return false;
     auto me = static_cast<QMouseEvent*>(m_event);
     return ((me->type() == QEvent::MouseButtonPress || me->type() == QEvent::MouseButtonDblClick) &&
             (me->buttons() & me->button()) == me->buttons());
@@ -1538,18 +1753,24 @@ bool QQuickPointerMouseEvent::isPressEvent() const
 
 bool QQuickPointerMouseEvent::isDoubleClickEvent() const
 {
+    if (!m_event)
+        return false;
     auto me = static_cast<QMouseEvent*>(m_event);
     return (me->type() == QEvent::MouseButtonDblClick);
 }
 
 bool QQuickPointerMouseEvent::isUpdateEvent() const
 {
+    if (!m_event)
+        return false;
     auto me = static_cast<QMouseEvent*>(m_event);
     return me->type() == QEvent::MouseMove;
 }
 
 bool QQuickPointerMouseEvent::isReleaseEvent() const
 {
+    if (!m_event)
+        return false;
     auto me = static_cast<QMouseEvent*>(m_event);
     return me && me->type() == QEvent::MouseButtonRelease;
 }
@@ -1700,6 +1921,81 @@ QMouseEvent *QQuickPointerTouchEvent::syntheticMouseEvent(int pointID, QQuickIte
     return &m_synthMouseEvent;
 }
 
+#if QT_CONFIG(tabletevent)
+QQuickPointerTabletEvent::QQuickPointerTabletEvent(QObject *parent, QQuickPointerDevice *device)
+    : QQuickSinglePointEvent(parent, device)
+{
+    m_point = new QQuickEventTabletPoint(this);
+}
+
+QQuickPointerEvent *QQuickPointerTabletEvent::reset(QEvent *event)
+{
+    auto ev = static_cast<QTabletEvent*>(event);
+    m_event = ev;
+    if (!event)
+        return this;
+
+    Q_ASSERT(m_device == QQuickPointerDevice::tabletDevice(ev));
+    m_device->eventDeliveryTargets().clear();
+    m_button = ev->button();
+    m_pressedButtons = ev->buttons();
+    static_cast<QQuickEventTabletPoint *>(m_point)->reset(ev);
+    return this;
+}
+
+QQuickEventTabletPoint::QQuickEventTabletPoint(QQuickPointerTabletEvent *parent)
+  : QQuickEventPoint(parent)
+{
+}
+
+void QQuickEventTabletPoint::reset(const QTabletEvent *ev)
+{
+    Qt::TouchPointState state = Qt::TouchPointStationary;
+    switch (ev->type()) {
+    case QEvent::TabletPress:
+        state = Qt::TouchPointPressed;
+        clearPassiveGrabbers();
+        break;
+    case QEvent::TabletRelease:
+        state = Qt::TouchPointReleased;
+        break;
+    case QEvent::TabletMove:
+        state = Qt::TouchPointMoved;
+        break;
+    default:
+        break;
+    }
+    QQuickEventPoint::reset(state, ev->posF(), 1, ev->timestamp());
+    m_rotation = ev->rotation();
+    m_pressure = ev->pressure();
+    m_tangentialPressure = ev->tangentialPressure();
+    m_tilt = QVector2D(ev->xTilt(), ev->yTilt());
+}
+
+bool QQuickPointerTabletEvent::isPressEvent() const
+{
+    auto me = static_cast<QTabletEvent *>(m_event);
+    return me->type() == QEvent::TabletPress;
+}
+
+bool QQuickPointerTabletEvent::isUpdateEvent() const
+{
+    auto me = static_cast<QTabletEvent *>(m_event);
+    return me->type() == QEvent::TabletMove;
+}
+
+bool QQuickPointerTabletEvent::isReleaseEvent() const
+{
+    auto me = static_cast<QTabletEvent *>(m_event);
+    return me->type() == QEvent::TabletRelease;
+}
+
+QTabletEvent *QQuickPointerTabletEvent::asTabletEvent() const
+{
+    return static_cast<QTabletEvent *>(m_event);
+}
+#endif // QT_CONFIG(tabletevent)
+
 #if QT_CONFIG(gestures)
 bool QQuickPointerNativeGestureEvent::isPressEvent() const
 {
@@ -1828,6 +2124,7 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
     // but that would require changing tst_qquickwindow::touchEvent_velocity(): it expects transformed velocity
 
     bool anyPressOrReleaseInside = false;
+    bool anyStationaryWithModifiedPropertyInside = false;
     bool anyGrabber = false;
     QMatrix4x4 transformMatrix(QQuickItemPrivate::get(item)->windowToItemTransform());
     for (int i = 0; i < m_pointCount; ++i) {
@@ -1860,12 +2157,14 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
             anyPressOrReleaseInside = true;
         const QTouchEvent::TouchPoint *tp = touchPointById(p->pointId());
         if (tp) {
+            if (isInside && tp->d->stationaryWithModifiedProperty)
+                anyStationaryWithModifiedPropertyInside = true;
             eventStates |= tp->state();
             QTouchEvent::TouchPoint tpCopy = *tp;
             tpCopy.setPos(item->mapFromScene(tpCopy.scenePos()));
             tpCopy.setLastPos(item->mapFromScene(tpCopy.lastScenePos()));
             tpCopy.setStartPos(item->mapFromScene(tpCopy.startScenePos()));
-            tpCopy.setRect(item->mapRectFromScene(tpCopy.sceneRect()));
+            tpCopy.setEllipseDiameters(tpCopy.ellipseDiameters());
             tpCopy.setVelocity(transformMatrix.mapVector(tpCopy.velocity()).toVector2D());
             touchPoints << tpCopy;
         }
@@ -1873,7 +2172,8 @@ QTouchEvent *QQuickPointerTouchEvent::touchEventForItem(QQuickItem *item, bool i
 
     // Now touchPoints will have only points which are inside the item.
     // But if none of them were just pressed inside, and the item has no other reason to care, ignore them anyway.
-    if (eventStates == Qt::TouchPointStationary || touchPoints.isEmpty() || (!anyPressOrReleaseInside && !anyGrabber && !isFiltering))
+    if ((eventStates == Qt::TouchPointStationary && !anyStationaryWithModifiedPropertyInside) ||
+            touchPoints.isEmpty() || (!anyPressOrReleaseInside && !anyGrabber && !isFiltering))
         return nullptr;
 
     // if all points have the same state, set the event type accordingly
@@ -1937,6 +2237,10 @@ Q_QUICK_PRIVATE_EXPORT QDebug operator<<(QDebug dbg, const QQuickPointerEvent *e
 {
     QDebugStateSaver saver(dbg);
     dbg.nospace();
+    if (!event) {
+        dbg << "QQuickPointerEvent(0)";
+        return dbg;
+    }
     dbg << "QQuickPointerEvent(";
     dbg << event->timestamp();
     dbg << " dev:";
@@ -1957,10 +2261,14 @@ Q_QUICK_PRIVATE_EXPORT QDebug operator<<(QDebug dbg, const QQuickEventPoint *eve
 {
     QDebugStateSaver saver(dbg);
     dbg.nospace();
+    if (!event) {
+        dbg << "QQuickEventPoint(0)";
+        return dbg;
+    }
     dbg << "QQuickEventPoint(accepted:" << event->isAccepted()
         << " state:";
     QtDebugUtils::formatQEnum(dbg, event->state());
-    dbg << " scenePos:" << event->scenePosition() << " id:" << hex << event->pointId() << dec
+    dbg << " scenePos:" << event->scenePosition() << " id:" << Qt::hex << event->pointId() << Qt::dec
         << " timeHeld:" << event->timeHeld() << ')';
     return dbg;
 }

@@ -79,6 +79,12 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTableView : public QQuickFlickable
     Q_PROPERTY(bool reuseItems READ reuseItems WRITE setReuseItems NOTIFY reuseItemsChanged)
     Q_PROPERTY(qreal contentWidth READ contentWidth WRITE setContentWidth NOTIFY contentWidthChanged)
     Q_PROPERTY(qreal contentHeight READ contentHeight WRITE setContentHeight NOTIFY contentHeightChanged)
+    Q_PROPERTY(QQuickTableView *syncView READ syncView WRITE setSyncView NOTIFY syncViewChanged REVISION 14)
+    Q_PROPERTY(Qt::Orientations syncDirection READ syncDirection WRITE setSyncDirection NOTIFY syncDirectionChanged REVISION 14)
+
+    QML_NAMED_ELEMENT(TableView)
+    QML_ADDED_IN_MINOR_VERSION(12)
+    QML_ATTACHED(QQuickTableViewAttached)
 
 public:
     QQuickTableView(QQuickItem *parent = nullptr);
@@ -93,13 +99,13 @@ public:
     void setColumnSpacing(qreal spacing);
 
     QJSValue rowHeightProvider() const;
-    void setRowHeightProvider(QJSValue provider);
+    void setRowHeightProvider(const QJSValue &provider);
 
     QJSValue columnWidthProvider() const;
-    void setColumnWidthProvider(QJSValue provider);
+    void setColumnWidthProvider(const QJSValue &provider);
 
-    virtual QVariant model() const;
-    virtual void setModel(const QVariant &newModel);
+    QVariant model() const;
+    void setModel(const QVariant &newModel);
 
     QQmlComponent *delegate() const;
     void setDelegate(QQmlComponent *);
@@ -109,6 +115,12 @@ public:
 
     void setContentWidth(qreal width);
     void setContentHeight(qreal height);
+
+    QQuickTableView *syncView() const;
+    void setSyncView(QQuickTableView *view);
+
+    Qt::Orientations syncDirection() const;
+    void setSyncDirection(Qt::Orientations direction);
 
     Q_INVOKABLE void forceLayout();
 
@@ -124,6 +136,8 @@ Q_SIGNALS:
     void modelChanged();
     void delegateChanged();
     void reuseItemsChanged();
+    Q_REVISION(14) void syncViewChanged();
+    Q_REVISION(14) void syncDirectionChanged();
 
 protected:
     void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry) override;
@@ -136,6 +150,11 @@ protected:
 private:
     Q_DISABLE_COPY(QQuickTableView)
     Q_DECLARE_PRIVATE(QQuickTableView)
+
+    qreal minXExtent() const override;
+    qreal maxXExtent() const override;
+    qreal minYExtent() const override;
+    qreal maxYExtent() const override;
 
     Q_PRIVATE_SLOT(d_func(), void _q_componentFinalized())
 };
@@ -171,6 +190,5 @@ private:
 QT_END_NAMESPACE
 
 QML_DECLARE_TYPE(QQuickTableView)
-QML_DECLARE_TYPEINFO(QQuickTableView, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif // QQUICKTABLEVIEW_P_H

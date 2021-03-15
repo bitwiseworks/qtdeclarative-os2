@@ -41,7 +41,6 @@
 #include "qjsengine_p.h"
 #include "qjsvalue.h"
 #include "qjsvalue_p.h"
-#include "private/qv8engine_p.h"
 
 #include "private/qv4engine_p.h"
 #include "private/qv4mm_p.h"
@@ -71,11 +70,6 @@
 #include <qwaitcondition.h>
 #include <private/qqmlglobal_p.h>
 #include <qqmlengine.h>
-
-#undef Q_D
-#undef Q_Q
-#define Q_D(blah)
-#define Q_Q(blah)
 
 Q_DECLARE_METATYPE(QList<int>)
 
@@ -258,7 +252,7 @@ Q_DECLARE_METATYPE(QList<int>)
     \l installExtensions().
 
     \value TranslationExtension Indicates that translation functions (\c qsTr(),
-        for example) should be installed.
+        for example) should be installed. This also installs the Qt.uiLanguage property.
 
     \value ConsoleExtension Indicates that console functions (\c console.log(),
         for example) should be installed.
@@ -348,7 +342,6 @@ QJSEngine::QJSEngine(QObject *parent)
     : QObject(*new QJSEnginePrivate, parent)
     , m_v4Engine(new QV4::ExecutionEngine(this))
 {
-    m_v4Engine->v8Engine = new QV8Engine(m_v4Engine);
     checkForApplicationInstance();
 
     QJSEnginePrivate::addToDebugServer(this);
@@ -361,7 +354,6 @@ QJSEngine::QJSEngine(QJSEnginePrivate &dd, QObject *parent)
     : QObject(dd, parent)
     , m_v4Engine(new QV4::ExecutionEngine(this))
 {
-    m_v4Engine->v8Engine = new QV8Engine(m_v4Engine);
     checkForApplicationInstance();
 }
 
@@ -375,7 +367,6 @@ QJSEngine::QJSEngine(QJSEnginePrivate &dd, QObject *parent)
 QJSEngine::~QJSEngine()
 {
     QJSEnginePrivate::removeFromDebugServer(this);
-    delete m_v4Engine->v8Engine;
     delete m_v4Engine;
 }
 
@@ -470,6 +461,33 @@ void QJSEngine::installExtensions(QJSEngine::Extensions extensions, const QJSVal
     QV4::GlobalExtensions::init(obj, extensions);
 }
 
+/*!
+  \since 5.14
+  Interrupts or re-enables JavaScript execution.
+
+  If \a interrupted is \c true, any JavaScript executed by this engine
+  immediately aborts and returns an error object until this function is
+  called again with a value of \c false for \a interrupted.
+
+  This function is thread safe. You may call it from a different thread
+  in order to interrupt, for example, an infinite loop in JavaScript.
+*/
+void QJSEngine::setInterrupted(bool interrupted)
+{
+    m_v4Engine->isInterrupted = interrupted;
+}
+
+/*!
+  \since 5.14
+  Returns whether JavaScript execution is currently interrupted.
+
+  \sa setInterrupted()
+*/
+bool QJSEngine::isInterrupted() const
+{
+    return m_v4Engine->isInterrupted.loadAcquire();
+}
+
 static QUrl urlForFileName(const QString &fileName)
 {
     if (!fileName.startsWith(QLatin1Char(':')))
@@ -527,6 +545,8 @@ QJSValue QJSEngine::evaluate(const QString& program, const QString& fileName, in
         result = script.run();
     if (scope.engine->hasException)
         result = v4->catchException();
+    if (v4->isInterrupted.loadAcquire())
+        result = v4->newErrorObject(QStringLiteral("Interrupted"));
 
     QJSValue retval(v4, result->asReturnedValue());
 
@@ -565,7 +585,12 @@ QJSValue QJSEngine::importModule(const QString &fileName)
     if (m_v4Engine->hasException)
         return QJSValue(m_v4Engine, m_v4Engine->catchException());
     moduleUnit->evaluate();
-    return QJSValue(m_v4Engine, moduleNamespace->asReturnedValue());
+    if (!m_v4Engine->isInterrupted.loadAcquire())
+        return QJSValue(m_v4Engine, moduleNamespace->asReturnedValue());
+
+    return QJSValue(
+            m_v4Engine,
+            m_v4Engine->newErrorObject(QStringLiteral("Interrupted"))->asReturnedValue());
 }
 
 /*!
@@ -585,7 +610,9 @@ QJSValue QJSEngine::newObject()
 
 /*!
   \since 5.12
-  Creates a JavaScript object of class Error.
+
+  Creates a JavaScript object of class Error, with \a message as the error
+  message.
 
   The prototype of the created object will be \a errorType.
 
@@ -660,7 +687,6 @@ QJSValue QJSEngine::newArray(uint length)
 */
 QJSValue QJSEngine::newQObject(QObject *object)
 {
-    Q_D(QJSEngine);
     QV4::ExecutionEngine *v4 = m_v4Engine;
     QV4::Scope scope(v4);
     if (object) {
@@ -687,7 +713,6 @@ QJSValue QJSEngine::newQObject(QObject *object)
 */
 
 QJSValue QJSEngine::newQMetaObject(const QMetaObject* metaObject) {
-    Q_D(QJSEngine);
     QV4::ExecutionEngine *v4 = m_v4Engine;
     QV4::Scope scope(v4);
     QV4::ScopedValue v(scope, QV4::QMetaObjectWrapper::create(v4, metaObject));
@@ -970,6 +995,35 @@ void QJSEngine::throwError(QJSValue::ErrorType errorType, const QString &message
     if (!e)
         return;
     m_v4Engine->throwError(e);
+}
+
+/*!
+  \property QJSEngine::uiLanguage
+  \brief the language to be used for translating user interface strings
+  \since 5.15
+
+  This property holds the name of the language to be used for user interface
+  string translations. It is exposed for reading and writing as \c{Qt.uiLanguage} when
+  the QJSEngine::TranslationExtension is installed on the engine. It is always exposed
+  in instances of QQmlEngine.
+
+  You can set the value freely and use it in bindings. It is recommended to set it
+  after installing translators in your application. By convention, an empty string
+  means no translation from the language used in the source code is intended to occur.
+*/
+void QJSEngine::setUiLanguage(const QString &language)
+{
+    Q_D(QJSEngine);
+    if (language == d->uiLanguage)
+        return;
+    d->uiLanguage = language;
+    emit uiLanguageChanged();
+}
+
+QString QJSEngine::uiLanguage() const
+{
+    Q_D(const QJSEngine);
+    return d->uiLanguage;
 }
 
 QJSEnginePrivate *QJSEnginePrivate::get(QV4::ExecutionEngine *e)

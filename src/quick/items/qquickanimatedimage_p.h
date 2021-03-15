@@ -74,6 +74,7 @@ class Q_AUTOTEST_EXPORT QQuickAnimatedImage : public QQuickImage
 
     // read-only for AnimatedImage
     Q_PROPERTY(QSize sourceSize READ sourceSize NOTIFY sourceSizeChanged)
+    QML_NAMED_ELEMENT(AnimatedImage)
 
 public:
     QQuickAnimatedImage(QQuickItem *parent=nullptr);
@@ -85,10 +86,10 @@ public:
     bool isPaused() const;
     void setPaused(bool pause);
 
-    int currentFrame() const;
-    void setCurrentFrame(int frame);
+    int currentFrame() const override;
+    void setCurrentFrame(int frame) override;
 
-    int frameCount() const;
+    int frameCount() const override;
 
     qreal speed() const;
     void setSpeed(qreal speed);
@@ -101,6 +102,7 @@ Q_SIGNALS:
     void playingChanged();
     void pausedChanged();
     void frameChanged();
+    void currentFrameChanged();
     void frameCountChanged();
     Q_REVISION(11) void speedChanged();
 

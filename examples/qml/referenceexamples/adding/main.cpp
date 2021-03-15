@@ -56,13 +56,10 @@
 int main(int argc, char ** argv)
 {
     QCoreApplication app(argc, argv);
-//![0]
-    qmlRegisterType<Person>("People", 1,0, "Person");
-//![0]
 
     QQmlEngine engine;
     QQmlComponent component(&engine, QUrl("qrc:example.qml"));
-    Person *person = qobject_cast<Person *>(component.create());
+    auto *person = qobject_cast<Person *>(component.create());
     if (person) {
         qWarning() << "The person's name is" << person->name();
         qWarning() << "They wear a" << person->shoeSize() << "sized shoe";
@@ -70,5 +67,5 @@ int main(int argc, char ** argv)
         qWarning() << component.errors();
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }

@@ -59,9 +59,9 @@ QT_REQUIRE_CONFIG(quick_itemview);
 #include "qquickitemviewfxitem_p_p.h"
 #include "qquickitemviewtransition_p.h"
 #include "qquickflickable_p_p.h"
-#include <QtQml/private/qqmlobjectmodel_p.h>
-#include <QtQml/private/qqmldelegatemodel_p.h>
-#include <QtQml/private/qqmlchangeset_p.h>
+#include <QtQmlModels/private/qqmlobjectmodel_p.h>
+#include <QtQmlModels/private/qqmldelegatemodel_p.h>
+#include <QtQmlModels/private/qqmlchangeset_p.h>
 
 
 QT_BEGIN_NAMESPACE
@@ -92,7 +92,7 @@ public:
     int itemCount;
     int newCurrentIndex;
     QQmlChangeSet pendingChanges;
-    QHash<QQmlChangeSet::MoveKey, FxViewItem *> removedItems;
+    QMultiHash<QQmlChangeSet::MoveKey, FxViewItem *> removedItems;
 
     bool active : 1;
     bool currentChanged : 1;
@@ -158,7 +158,7 @@ public:
     qreal contentStartOffset() const;
     int findLastVisibleIndex(int defaultValue = -1) const;
     FxViewItem *visibleItem(int modelIndex) const;
-    FxViewItem *firstVisibleItem() const;
+    FxViewItem *firstItemInView() const;
     int findLastIndexInView() const;
     int mapFromModel(int modelIndex) const;
 
@@ -174,7 +174,7 @@ public:
     void mirrorChange() override;
 
     FxViewItem *createItem(int modelIndex,QQmlIncubator::IncubationMode incubationMode = QQmlIncubator::AsynchronousIfNested);
-    virtual bool releaseItem(FxViewItem *item);
+    virtual bool releaseItem(FxViewItem *item, QQmlInstanceModel::ReusableFlag reusableFlag);
 
     QQuickItem *createHighlightItem() const;
     QQuickItem *createComponentItem(QQmlComponent *component, qreal zValue, bool createDefault = false) const;
@@ -191,6 +191,8 @@ public:
     qreal calculatedMinExtent() const;
     qreal calculatedMaxExtent() const;
 
+    void applyDelegateChange();
+
     void applyPendingChanges();
     bool applyModelChanges(ChangeResult *insertionResult, ChangeResult *removalResult);
     bool applyRemovalChange(const QQmlChangeSet::Change &removal, ChangeResult *changeResult, int *removedCount);
@@ -201,7 +203,7 @@ public:
 
     void createTransitioner();
     void prepareVisibleItemTransitions();
-    void prepareRemoveTransitions(QHash<QQmlChangeSet::MoveKey, FxViewItem *> *removedItems);
+    void prepareRemoveTransitions(QMultiHash<QQmlChangeSet::MoveKey, FxViewItem *> *removedItems);
     bool prepareNonVisibleItemTransition(FxViewItem *item, const QRectF &viewBounds);
     void viewItemTransitionFinished(QQuickItemViewTransitionableItem *item) override;
 
@@ -236,14 +238,16 @@ public:
         q->polish();
     }
 
-    void releaseVisibleItems() {
+    void releaseVisibleItems(QQmlInstanceModel::ReusableFlag reusableFlag) {
         // make a copy and clear the visibleItems first to avoid destroyed
         // items being accessed during the loop (QTBUG-61294)
         const QList<FxViewItem *> oldVisible = visibleItems;
         visibleItems.clear();
         for (FxViewItem *item : oldVisible)
-            releaseItem(item);
+            releaseItem(item, reusableFlag);
     }
+
+    virtual QQuickItemViewAttached *getAttachedObject(const QObject *) const { return nullptr; }
 
     QPointer<QQmlInstanceModel> model;
     QVariant modelVariant;
@@ -258,6 +262,12 @@ public:
     MovementReason moveReason;
 
     QList<FxViewItem *> visibleItems;
+    qreal firstVisibleItemPosition = 0;
+    void storeFirstVisibleItemPosition() {
+        if (!visibleItems.isEmpty()) {
+            firstVisibleItemPosition = visibleItems.constFirst()->position();
+        }
+    }
     int visibleIndex;
     int currentIndex;
     FxViewItem *currentItem;
@@ -279,6 +289,11 @@ public:
     FxViewItem *header;
     QQmlComponent *footerComponent;
     FxViewItem *footer;
+
+    // Reusing delegate items cannot be on by default for backwards compatibility.
+    // Reusing an item will e.g mean that Component.onCompleted will only be called for an
+    // item when it's created and not when it's reused, which will break legacy applications.
+    QQmlInstanceModel::ReusableFlag reusableFlag = QQmlInstanceModel::NotReusable;
 
     struct MovedItem {
         FxViewItem *item;
@@ -308,6 +323,7 @@ public:
     bool inRequest : 1;
     bool runDelayedRemoveTransition : 1;
     bool delegateValidated : 1;
+    bool isClearing : 1;
 
 protected:
     virtual Qt::Orientation layoutOrientation() const = 0;

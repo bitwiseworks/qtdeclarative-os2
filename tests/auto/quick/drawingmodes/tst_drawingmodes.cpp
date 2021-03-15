@@ -69,6 +69,9 @@ private slots:
     void triangles();
     void triangleStrip();
     void triangleFan();
+
+private:
+    bool isRunningOnRhi() const;
 };
 
 class DrawingModeItem : public QQuickItem
@@ -151,7 +154,7 @@ void tst_drawingmodes::points()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
 #ifdef Q_OS_WIN
     if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
@@ -194,7 +197,7 @@ void tst_drawingmodes::lines()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -225,7 +228,7 @@ void tst_drawingmodes::lineStrip()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -258,7 +261,10 @@ void tst_drawingmodes::lineLoop()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+
+    if (isRunningOnRhi())
+        QSKIP("Line loops are not supported by some modern graphics APIs - skipping test");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -291,7 +297,7 @@ void tst_drawingmodes::triangles()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -320,7 +326,7 @@ void tst_drawingmodes::triangleStrip()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -348,7 +354,10 @@ void tst_drawingmodes::triangleFan()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QSKIP("Skipping due to grabWindow not functional on offscreen/minimimal platforms");
+        QSKIP("Skipping due to grabWindow not functional on offscreen/minimal platforms");
+
+    if (isRunningOnRhi())
+        QSKIP("Triangle fans are not supported by some modern graphics APIs - skipping test");
 
     QImage fb = runTest("DrawingModes.qml");
 
@@ -366,6 +375,23 @@ void tst_drawingmodes::triangleFan()
     QVERIFY(hasPixelAround(fb, 62, 100));
     QVERIFY(hasPixelAround(fb, 50, 125));
     QVERIFY(!hasPixelAround(fb, 37, 100));
+}
+
+bool tst_drawingmodes::isRunningOnRhi() const
+{
+    static bool retval = false;
+    static bool decided = false;
+    if (!decided) {
+        decided = true;
+        QQuickView dummy;
+        dummy.show();
+        if (QTest::qWaitForWindowExposed(&dummy)) {
+            QSGRendererInterface::GraphicsApi api = dummy.rendererInterface()->graphicsApi();
+            retval = QSGRendererInterface::isApiRhiBased(api);
+        }
+        dummy.hide();
+    }
+    return retval;
 }
 
 

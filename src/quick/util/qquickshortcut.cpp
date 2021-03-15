@@ -80,16 +80,12 @@
 /*! \qmlsignal QtQuick::Shortcut::activated()
 
     This signal is emitted when the shortcut is activated.
-
-    The corresponding handler is \c onActivated.
 */
 
 /*! \qmlsignal QtQuick::Shortcut::activatedAmbiguously()
 
     This signal is emitted when the shortcut is activated ambigously,
     meaning that it matches the start of more than one shortcut.
-
-    The corresponding handler is \c onActivatedAmbiguously.
 */
 
 static bool qQuickShortcutContextMatcher(QObject *obj, Qt::ShortcutContext context)
@@ -130,7 +126,7 @@ QT_BEGIN_NAMESPACE
 
 static QKeySequence valueToKeySequence(const QVariant &value)
 {
-    if (value.type() == QVariant::Int)
+    if (value.userType() == QMetaType::Int)
         return QKeySequence(static_cast<QKeySequence::StandardKey>(value.toInt()));
     return QKeySequence::fromString(value.toString());
 }
@@ -216,7 +212,7 @@ void QQuickShortcut::setSequences(const QVariantList &values)
 
     bool changed = !remainder.isEmpty();
     for (int i = 0; i < values.count(); ++i) {
-        QVariant value = values.at(i);
+        const QVariant &value = values.at(i);
         Shortcut& shortcut = m_shortcuts[i];
         if (value == shortcut.userValue)
             continue;

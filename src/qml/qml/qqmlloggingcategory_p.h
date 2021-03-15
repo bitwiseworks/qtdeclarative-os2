@@ -56,6 +56,7 @@
 #include <QtCore/qloggingcategory.h>
 
 #include <QtQml/qqmlparserstatus.h>
+#include <QtQml/qqml.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -65,7 +66,9 @@ class QQmlLoggingCategory : public QObject, public QQmlParserStatus
     Q_INTERFACES(QQmlParserStatus)
 
     Q_PROPERTY(QString name READ name WRITE setName)
-    Q_PROPERTY(DefaultLogLevel defaultLogLevel READ defaultLogLevel WRITE setDefaultLogLevel REVISION 1)
+    Q_PROPERTY(DefaultLogLevel defaultLogLevel READ defaultLogLevel WRITE setDefaultLogLevel REVISION 12)
+    QML_NAMED_ELEMENT(LoggingCategory)
+    QML_ADDED_IN_MINOR_VERSION(8)
 
 public:
     enum DefaultLogLevel {

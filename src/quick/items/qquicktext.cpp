@@ -40,6 +40,9 @@
 #include "qquicktext_p.h"
 #include "qquicktext_p_p.h"
 
+#include <private/qqmldebugserviceinterfaces_p.h>
+#include <private/qqmldebugconnector_p.h>
+
 #include <QtQuick/private/qsgcontext_p.h>
 #include <private/qqmlglobal_p.h>
 #include <private/qsgadaptationlayer_p.h>
@@ -517,11 +520,34 @@ void QQuickTextLine::setLineOffset(int offset)
     m_lineOffset = offset;
 }
 
+void QQuickTextLine::setFullLayoutTextLength(int length)
+{
+    m_fullLayoutTextLength = length;
+}
+
 int QQuickTextLine::number() const
 {
     if (m_line)
         return m_line->lineNumber() + m_lineOffset;
     return 0;
+}
+
+qreal QQuickTextLine::implicitWidth() const
+{
+    if (m_line)
+        return m_line->naturalTextWidth();
+    return 0;
+}
+
+bool QQuickTextLine::isLast() const
+{
+    if (m_line && (m_line->textStart() + m_line->textLength()) == m_fullLayoutTextLength) {
+        // Ensure that isLast will change if the user reduced the width of the line
+        // so that the text no longer fits.
+        return m_line->width() >= m_line->naturalTextWidth();
+    }
+
+    return false;
 }
 
 qreal QQuickTextLine::width() const
@@ -585,12 +611,13 @@ bool QQuickTextPrivate::isLineLaidOutConnected()
     IS_SIGNAL_CONNECTED(q, QQuickText, lineLaidOut, (QQuickTextLine *));
 }
 
-void QQuickTextPrivate::setupCustomLineGeometry(QTextLine &line, qreal &height, int lineOffset)
+void QQuickTextPrivate::setupCustomLineGeometry(QTextLine &line, qreal &height, int fullLayoutTextLength, int lineOffset)
 {
     Q_Q(QQuickText);
 
     if (!textLine)
         textLine = new QQuickTextLine;
+    textLine->setFullLayoutTextLength(fullLayoutTextLength);
     textLine->setLine(&line);
     textLine->setY(height);
     textLine->setHeight(0);
@@ -790,7 +817,7 @@ QRectF QQuickTextPrivate::setupTextLayout(qreal *const baseline)
             if (noBreakLastLine && visibleCount == maxLineCount)
                 layout.engine()->option.setWrapMode(QTextOption::WrapAnywhere);
             if (customLayout) {
-                setupCustomLineGeometry(line, naturalHeight);
+                setupCustomLineGeometry(line, naturalHeight, layoutText.length());
             } else {
                 setLineGeometry(line, lineWidth, naturalHeight);
             }
@@ -1122,13 +1149,17 @@ QRectF QQuickTextPrivate::setupTextLayout(qreal *const baseline)
 
         elideLayout->setFont(layout.font());
         elideLayout->setTextOption(layout.textOption());
+        if (QQmlDebugTranslationService *service
+                     = QQmlDebugConnector::service<QQmlDebugTranslationService>()) {
+            elideText = service->foundElidedText(q, layoutText, elideText);
+        }
         elideLayout->setText(elideText);
         elideLayout->beginLayout();
 
         QTextLine elidedLine = elideLayout->createLine();
         elidedLine.setPosition(QPointF(0, height));
         if (customLayout) {
-            setupCustomLineGeometry(elidedLine, height, visibleCount - 1);
+            setupCustomLineGeometry(elidedLine, height, elideText.length(), visibleCount - 1);
         } else {
             setLineGeometry(elidedLine, lineWidth, height);
         }
@@ -1188,7 +1219,7 @@ void QQuickTextPrivate::setLineGeometry(QTextLine &line, qreal lineWidth, qreal 
 
                 if (!image->pix) {
                     QUrl url = q->baseUrl().resolved(image->url);
-                    image->pix = new QQuickPixmap(qmlEngine(q), url, image->size);
+                    image->pix = new QQuickPixmap(qmlEngine(q), url, QRect(), image->size);
                     if (image->pix->isLoading()) {
                         image->pix->connectFinished(q, SLOT(imageDownloadFinished()));
                         if (!extra.isAllocated() || !extra->nbActiveDownloads)
@@ -1335,20 +1366,43 @@ QQuickText::~QQuickText()
     \qmlsignal QtQuick::Text::lineLaidOut(object line)
 
     This signal is emitted for each line of text that is laid out during the layout
-    process. The specified \a line object provides more details about the line that
+    process in plain text or styled text mode. It is not emitted in rich text mode.
+    The specified \a line object provides more details about the line that
     is currently being laid out.
 
     This gives the opportunity to position and resize a line as it is being laid out.
     It can for example be used to create columns or lay out text around objects.
 
     The properties of the specified \a line object are:
-    \list
-    \li number (read-only)
-    \li x
-    \li y
-    \li width
-    \li height
-    \endlist
+
+    \table
+    \header
+        \li Property name
+        \li Description
+    \row
+        \li number (read-only)
+        \li Line number, starts with zero.
+    \row
+        \li x
+        \li Specifies the line's x position inside the \c Text element.
+    \row
+        \li y
+        \li Specifies the line's y position inside the \c Text element.
+    \row
+        \li width
+        \li Specifies the width of the line.
+    \row
+        \li height
+        \li Specifies the height of the line.
+    \row
+        \li implicitWidth (read-only)
+        \li The width that the line would naturally occupy based on its contents,
+            not taking into account any modifications made to \a width.
+    \row
+        \li isLast (read-only)
+        \li Whether the line is the last. This property can change if you
+            set the \a width property to a different value.
+    \endtable
 
     For example, this will move the first 5 lines of a Text item by 100 pixels to the right:
     \code
@@ -1360,7 +1414,15 @@ QQuickText::~QQuickText()
     }
     \endcode
 
-    The corresponding handler is \c onLineLaidOut.
+    The following example will allow you to position an item at the end of the last line:
+    \code
+    onLineLaidOut: {
+        if (line.isLast) {
+            lastLineMarker.x = line.x + line.implicitWidth
+            lastLineMarker.y = line.y + (line.height - lastLineMarker.height) / 2
+        }
+    }
+    \endcode
 */
 
 /*!
@@ -1377,8 +1439,6 @@ QQuickText::~QQuickText()
 
     Clicking on the highlighted link will output
     \tt{http://qt-project.org link activated} to the console.
-
-    The corresponding handler is \c onLinkActivated.
 */
 
 /*!
@@ -1640,6 +1700,9 @@ void QQuickText::itemChange(ItemChange change, const ItemChangeData &value)
 
     The item will try to automatically determine whether the text should
     be treated as styled text. This determination is made using Qt::mightBeRichText().
+    However, detection of Markdown is not automatic.
+
+    \sa textFormat
 */
 QString QQuickText::text() const
 {
@@ -1653,13 +1716,17 @@ void QQuickText::setText(const QString &n)
     if (d->text == n)
         return;
 
-    d->richText = d->format == RichText;
+    d->markdownText = d->format == MarkdownText;
+    d->richText = d->format == RichText || d->markdownText;
     d->styledText = d->format == StyledText || (d->format == AutoText && Qt::mightBeRichText(n));
     d->text = n;
     if (isComponentComplete()) {
         if (d->richText) {
             d->ensureDoc();
-            d->extra->doc->setText(n);
+            if (d->markdownText)
+                d->extra->doc->setMarkdownText(n);
+            else
+                d->extra->doc->setText(n);
             d->rightToLeftText = d->extra->doc->toPlainText().isRightToLeft();
         } else {
             d->clearFormats();
@@ -2063,26 +2130,25 @@ void QQuickText::resetMaximumLineCount()
 /*!
     \qmlproperty enumeration QtQuick::Text::textFormat
 
-    The way the text property should be displayed.
+    The way the \l text property should be displayed.
 
     Supported text formats are:
 
-    \list
-    \li Text.AutoText (default)
-    \li Text.PlainText
-    \li Text.StyledText
-    \li Text.RichText
-    \endlist
+    \value Text.AutoText        (default) detected via the Qt::mightBeRichText() heuristic
+    \value Text.PlainText       all styling tags are treated as plain text
+    \value Text.StyledText      optimized basic rich text as in HTML 3.2
+    \value Text.RichText        \l {Supported HTML Subset} {a subset of HTML 4}
+    \value Text.MarkdownText    \l {https://commonmark.org/help/}{CommonMark} plus the
+                                \l {https://guides.github.com/features/mastering-markdown/}{GitHub}
+                                extensions for tables and task lists (since 5.14)
 
     If the text format is \c Text.AutoText the Text item
     will automatically determine whether the text should be treated as
-    styled text.  This determination is made using Qt::mightBeRichText()
-    which uses a fast and therefore simple heuristic. It mainly checks
-    whether there is something that looks like a tag before the first
-    line break. Although the result may be correct for common cases,
-    there is no guarantee.
+    styled text.  This determination is made using Qt::mightBeRichText(),
+    which can detect the presence of an HTML tag on the first line of text,
+    but cannot distinguish Markdown from plain text.
 
-    Text.StyledText is an optimized format supporting some basic text
+    \c Text.StyledText is an optimized format supporting some basic text
     styling markup, in the style of HTML 3.2:
 
     \code
@@ -2108,30 +2174,21 @@ void QQuickText::resetMaximumLineCount()
     \table
     \row
     \li
-    \qml
-Column {
-    Text {
-        font.pointSize: 24
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-    Text {
-        font.pointSize: 24
-        textFormat: Text.RichText
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-    Text {
-        font.pointSize: 24
-        textFormat: Text.PlainText
-        text: "<b>Hello</b> <i>World!</i>"
-    }
-}
-    \endqml
+    \snippet qml/text/textFormats.qml 0
     \li \image declarative-textformat.png
     \endtable
 
-    Text.RichText supports a larger subset of HTML 4, as described on the
-    \l {Supported HTML Subset} page. You should prefer using Text.PlainText
-    or Text.StyledText instead, as they offer better performance.
+    \c Text.RichText supports a larger subset of HTML 4, as described on the
+    \l {Supported HTML Subset} page. You should prefer using \c Text.PlainText,
+    \c Text.StyledText or \c Text.MarkdownText instead, as they offer better performance.
+
+    \note With \c Text.MarkdownText, and with the supported subset of HTML,
+    some decorative elements are not rendered as they would be in a web browser:
+    \list
+    \li code blocks use the \l {QFontDatabase::FixedFont}{default monospace font} but without a surrounding highlight box
+    \li block quotes are indented, but there is no vertical line alongside the quote
+    \li horizontal rules are not rendered
+    \endlist
 */
 QQuickText::TextFormat QQuickText::textFormat() const
 {
@@ -2146,7 +2203,8 @@ void QQuickText::setTextFormat(TextFormat format)
         return;
     d->format = format;
     bool wasRich = d->richText;
-    d->richText = format == RichText;
+    d->markdownText = format == MarkdownText;
+    d->richText = format == RichText || d->markdownText;
     d->styledText = format == StyledText || (format == AutoText && Qt::mightBeRichText(d->text));
 
     if (isComponentComplete()) {
@@ -2588,6 +2646,12 @@ void QQuickText::setLineHeightMode(LineHeightMode mode)
 
     If the text does not fit within the item bounds with the minimum font size
     the text will be elided as per the \l elide property.
+
+    If the \l textFormat property is set to \l Text.RichText, this will have no effect at all as the
+    property will be ignored completely. If \l textFormat is set to \l Text.StyledText, then the
+    property will be respected provided there is no font size tags inside the text. If there are
+    font size tags, the property will still respect those. This can cause it to not fully comply with
+    the fontSizeMode setting.
 */
 
 QQuickText::FontSizeMode QQuickText::fontSizeMode() const
@@ -2687,7 +2751,10 @@ void QQuickText::componentComplete()
     if (d->updateOnComponentComplete) {
         if (d->richText) {
             d->ensureDoc();
-            d->extra->doc->setText(d->text);
+            if (d->markdownText)
+                d->extra->doc->setMarkdownText(d->text);
+            else
+                d->extra->doc->setText(d->text);
             d->rightToLeftText = d->extra->doc->toPlainText().isRightToLeft();
         } else {
             d->rightToLeftText = d->text.isRightToLeft();
@@ -2799,8 +2866,6 @@ bool QQuickTextPrivate::isLinkHoveredConnected()
     text. The link must be in rich text or HTML format and the \a link
     string provides access to the particular link.
 
-    The corresponding handler is \c onLinkHovered.
-
     \sa hoveredLink, linkAt()
 */
 
@@ -2904,6 +2969,8 @@ void QQuickText::setRenderType(QQuickText::RenderType renderType)
         d->updateLayout();
 }
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#if QT_DEPRECATED_SINCE(5, 15)
 /*!
     \qmlmethod QtQuick::Text::doLayout()
     \deprecated
@@ -2915,6 +2982,8 @@ void QQuickText::doLayout()
     forceLayout();
 }
 
+#endif
+#endif
 /*!
     \qmlmethod QtQuick::Text::forceLayout()
     \since 5.9

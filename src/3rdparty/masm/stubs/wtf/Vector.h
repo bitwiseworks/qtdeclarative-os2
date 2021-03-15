@@ -55,7 +55,6 @@ class Vector : public std::vector<T> {
 public:
     Vector() {}
     Vector(int initialSize) : std::vector<T>(initialSize) {}
-    Vector(const Vector &other) : std::vector<T>(other) {}
     Vector(std::initializer_list<T> list) : std::vector<T>(list) {}
 
     inline void append(const T& value)
@@ -109,6 +108,15 @@ public:
     inline bool isEmpty() const { return this->empty(); }
 
     inline T &last() { return *(this->begin() + this->size() - 1); }
+
+    bool contains(const T &value) const
+    {
+        for (const T &inVector : *this) {
+            if (inVector == value)
+                return true;
+        }
+        return false;
+    }
 };
 
 template <typename T, int capacity>

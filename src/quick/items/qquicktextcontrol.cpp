@@ -60,6 +60,7 @@
 #include <QtCore/qloggingcategory.h>
 
 #include <qtextformat.h>
+#include <qtransform.h>
 #include <qdatetime.h>
 #include <qbuffer.h>
 #include <qguiapplication.h>
@@ -113,6 +114,7 @@ QQuickTextControlPrivate::QQuickTextControlPrivate()
       wordSelectionEnabled(false),
       hasImState(false),
       cursorRectangleChanged(false),
+      hoveredMarker(false),
       lastSelectionStart(-1),
       lastSelectionEnd(-1)
 {}
@@ -321,6 +323,9 @@ void QQuickTextControlPrivate::setContent(Qt::TextFormat format, const QString &
             formatCursor.select(QTextCursor::Document);
             formatCursor.setCharFormat(charFormatForInsertion);
             formatCursor.endEditBlock();
+        } else if (format == Qt::MarkdownText) {
+            doc->setBaseUrl(doc->baseUrl().adjusted(QUrl::RemoveFilename));
+            doc->setMarkdown(text);
         } else {
 #if QT_CONFIG(texthtmlparser)
             doc->setHtml(text);
@@ -714,12 +719,12 @@ void QQuickTextControl::selectAll()
 
 void QQuickTextControl::processEvent(QEvent *e, const QPointF &coordinateOffset)
 {
-    QMatrix m;
-    m.translate(coordinateOffset.x(), coordinateOffset.y());
-    processEvent(e, m);
+    QTransform t;
+    t.translate(coordinateOffset.x(), coordinateOffset.y());
+    processEvent(e, t);
 }
 
-void QQuickTextControl::processEvent(QEvent *e, const QMatrix &matrix)
+void QQuickTextControl::processEvent(QEvent *e, const QTransform &transform)
 {
     Q_D(QQuickTextControl);
     if (d->interactionFlags == Qt::NoTextInteraction) {
@@ -736,25 +741,25 @@ void QQuickTextControl::processEvent(QEvent *e, const QMatrix &matrix)
             break;
         case QEvent::MouseButtonPress: {
             QMouseEvent *ev = static_cast<QMouseEvent *>(e);
-            d->mousePressEvent(ev, matrix.map(ev->localPos()));
+            d->mousePressEvent(ev, transform.map(ev->localPos()));
             break; }
         case QEvent::MouseMove: {
             QMouseEvent *ev = static_cast<QMouseEvent *>(e);
-            d->mouseMoveEvent(ev, matrix.map(ev->localPos()));
+            d->mouseMoveEvent(ev, transform.map(ev->localPos()));
             break; }
         case QEvent::MouseButtonRelease: {
             QMouseEvent *ev = static_cast<QMouseEvent *>(e);
-            d->mouseReleaseEvent(ev, matrix.map(ev->localPos()));
+            d->mouseReleaseEvent(ev, transform.map(ev->localPos()));
             break; }
         case QEvent::MouseButtonDblClick: {
             QMouseEvent *ev = static_cast<QMouseEvent *>(e);
-            d->mouseDoubleClickEvent(ev, matrix.map(ev->localPos()));
+            d->mouseDoubleClickEvent(ev, transform.map(ev->localPos()));
             break; }
         case QEvent::HoverEnter:
         case QEvent::HoverMove:
         case QEvent::HoverLeave: {
             QHoverEvent *ev = static_cast<QHoverEvent *>(e);
-            d->hoverEvent(ev, matrix.map(ev->posF()));
+            d->hoverEvent(ev, transform.map(ev->posF()));
             break; }
 #if QT_CONFIG(im)
         case QEvent::InputMethod:
@@ -790,8 +795,6 @@ void QQuickTextControl::timerEvent(QTimerEvent *e)
         d->cursorOn = !d->cursorOn;
 
         d->repaintCursor();
-    } else if (e->timerId() == d->tripleClickTimer.timerId()) {
-        d->tripleClickTimer.stop();
     }
 }
 
@@ -799,6 +802,12 @@ void QQuickTextControl::setPlainText(const QString &text)
 {
     Q_D(QQuickTextControl);
     d->setContent(Qt::PlainText, text);
+}
+
+void QQuickTextControl::setMarkdownText(const QString &text)
+{
+    Q_D(QQuickTextControl);
+    d->setContent(Qt::MarkdownText, text);
 }
 
 void QQuickTextControl::setHtml(const QString &text)
@@ -1027,6 +1036,8 @@ void QQuickTextControlPrivate::mousePressEvent(QMouseEvent *e, const QPointF &po
             cursor.clearSelection();
         }
     }
+    if (interactionFlags & Qt::TextEditable)
+        blockWithMarkerUnderMousePress = q->blockWithMarkerAt(pos);
     if (e->button() & Qt::MiddleButton) {
         return;
     } else  if (!(e->button() & Qt::LeftButton)) {
@@ -1046,7 +1057,7 @@ void QQuickTextControlPrivate::mousePressEvent(QMouseEvent *e, const QPointF &po
     commitPreedit();
 #endif
 
-    if (tripleClickTimer.isActive()
+    if ((e->timestamp() < (timestampAtLastDoubleClick + QGuiApplication::styleHints()->mouseDoubleClickInterval()))
         && ((pos - tripleClickPoint).toPoint().manhattanLength() < QGuiApplication::styleHints()->startDragDistance())) {
 
         cursor.movePosition(QTextCursor::StartOfBlock);
@@ -1056,7 +1067,7 @@ void QQuickTextControlPrivate::mousePressEvent(QMouseEvent *e, const QPointF &po
 
         anchorOnMousePress = QString();
 
-        tripleClickTimer.stop();
+        timestampAtLastDoubleClick = 0; // do not enter this condition in case of 4(!) rapid clicks
     } else {
         int cursorPos = q->hitTest(pos, Qt::FuzzyHit);
         if (cursorPos == -1) {
@@ -1181,7 +1192,7 @@ void QQuickTextControlPrivate::mouseReleaseEvent(QMouseEvent *e, const QPointF &
 #if QT_CONFIG(clipboard)
         setClipboardSelection();
         selectionChanged(true);
-    } else if (e->button() == Qt::MidButton
+    } else if (e->button() == Qt::MiddleButton
                && (interactionFlags & Qt::TextEditable)
                && QGuiApplication::clipboard()->supportsSelection()) {
         setCursorPosition(pos);
@@ -1196,6 +1207,16 @@ void QQuickTextControlPrivate::mouseReleaseEvent(QMouseEvent *e, const QPointF &
     if (cursor.position() != oldCursorPos) {
         emit q->cursorPositionChanged();
         q->updateCursorRectangle(true);
+    }
+
+    if ((interactionFlags & Qt::TextEditable) && (e->button() & Qt::LeftButton) && blockWithMarkerUnderMousePress.isValid()) {
+        QTextBlock block = q->blockWithMarkerAt(pos);
+        if (block == blockWithMarkerUnderMousePress) {
+            auto fmt = block.blockFormat();
+            fmt.setMarker(fmt.marker() == QTextBlockFormat::MarkerType::Unchecked ?
+                              QTextBlockFormat::MarkerType::Checked : QTextBlockFormat::MarkerType::Unchecked);
+            cursor.setBlockFormat(fmt);
+        }
     }
 
     if (interactionFlags & Qt::LinksAccessibleByMouse) {
@@ -1245,7 +1266,7 @@ void QQuickTextControlPrivate::mouseDoubleClickEvent(QMouseEvent *e, const QPoin
         selectedWordOnDoubleClick = cursor;
 
         tripleClickPoint = pos;
-        tripleClickTimer.start(QGuiApplication::styleHints()->mouseDoubleClickInterval(), q);
+        timestampAtLastDoubleClick = e->timestamp();
         if (doEmit) {
             selectionChanged();
 #if QT_CONFIG(clipboard)
@@ -1377,7 +1398,7 @@ QVariant QQuickTextControl::inputMethodQuery(Qt::InputMethodQuery property) cons
     return inputMethodQuery(property, QVariant());
 }
 
-QVariant QQuickTextControl::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
+QVariant QQuickTextControl::inputMethodQuery(Qt::InputMethodQuery property, const QVariant &argument) const
 {
     Q_D(const QQuickTextControl);
     QTextBlock block = d->cursor.block();
@@ -1480,8 +1501,15 @@ void QQuickTextControlPrivate::hoverEvent(QHoverEvent *e, const QPointF &pos)
     if (hoveredLink != link) {
         hoveredLink = link;
         emit q->linkHovered(link);
+        qCDebug(DBG_HOVER_TRACE) << q << e->type() << pos << "hoveredLink" << hoveredLink;
+    } else {
+        QTextBlock block = q->blockWithMarkerAt(pos);
+        if (block.isValid() != hoveredMarker)
+            emit q->markerHovered(block.isValid());
+        hoveredMarker = block.isValid();
+        if (hoveredMarker)
+            qCDebug(DBG_HOVER_TRACE) << q << e->type() << pos << "hovered marker" << int(block.blockFormat().marker()) << block.text();
     }
-    qCDebug(DBG_HOVER_TRACE) << q << e->type() << pos << "hoveredLink" << hoveredLink;
 }
 
 bool QQuickTextControl::hasImState() const
@@ -1555,6 +1583,12 @@ QString QQuickTextControl::anchorAt(const QPointF &pos) const
 {
     Q_D(const QQuickTextControl);
     return d->doc->documentLayout()->anchorAt(pos);
+}
+
+QTextBlock QQuickTextControl::blockWithMarkerAt(const QPointF &pos) const
+{
+    Q_D(const QQuickTextControl);
+    return d->doc->documentLayout()->blockWithMarkerAt(pos);
 }
 
 void QQuickTextControl::setAcceptRichText(bool accept)
@@ -1783,6 +1817,13 @@ QString QQuickTextControl::toPlainText() const
 QString QQuickTextControl::toHtml() const
 {
     return document()->toHtml();
+}
+#endif
+
+#if QT_CONFIG(textmarkdownwriter)
+QString QQuickTextControl::toMarkdown() const
+{
+    return document()->toMarkdown();
 }
 #endif
 

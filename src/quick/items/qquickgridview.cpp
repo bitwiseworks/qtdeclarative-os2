@@ -497,7 +497,7 @@ bool QQuickGridViewPrivate::addVisibleItems(qreal fillFrom, qreal fillTo, qreal 
         // We've jumped more than a page.  Estimate which items are now
         // visible and fill from there.
         int count = (fillFrom - (rowPos + rowSize())) / (rowSize()) * columns;
-        releaseVisibleItems();
+        releaseVisibleItems(reusableFlag);
         modelIndex += count;
         if (modelIndex >= model->count())
             modelIndex = model->count() - 1;
@@ -576,7 +576,7 @@ void QQuickGridViewPrivate::removeItem(FxViewItem *item)
         item->releaseAfterTransition = true;
         releasePendingTransition.append(item);
     } else {
-        releaseItem(item);
+        releaseItem(item, QQmlDelegateModel::NotReusable);
     }
 }
 
@@ -1298,8 +1298,6 @@ void QQuickGridView::setHighlightFollowsCurrentItem(bool autoHighlight)
 /*!
     \qmlattachedsignal QtQuick::GridView::add()
     This attached signal is emitted immediately after an item is added to the view.
-
-    The corresponding handler is \c onAdd.
 */
 
 /*!
@@ -1308,8 +1306,6 @@ void QQuickGridView::setHighlightFollowsCurrentItem(bool autoHighlight)
 
     If a \l remove transition has been specified, it is applied after
     this signal is handled, providing that \l delayRemove is false.
-
-    The corresponding handler is \c onRemove.
 */
 
 
@@ -1761,7 +1757,7 @@ void QQuickGridView::setSnapMode(SnapMode mode)
 
     \list
     \li The view is first created
-    \li The view's \l model changes
+    \li The view's \l model changes in such a way that the visible delegates are completely replaced
     \li The view's \l model is \l {QAbstractItemModel::reset()}{reset}, if the model is a QAbstractItemModel subclass
     \endlist
 
@@ -1778,6 +1774,28 @@ void QQuickGridView::setSnapMode(SnapMode mode)
 
     When the view is initialized, the view will create all the necessary items for the view,
     then animate them to their correct positions within the view over one second.
+
+    However when scrolling the view later, the populate transition does not
+    run, even though delegates are being instantiated as they become visible.
+    When the model changes in a way that new delegates become visible, the
+    \l add transition is the one that runs. So you should not depend on the
+    \c populate transition to initialize properties in the delegate, because it
+    does not apply to every delegate. If your animation sets the \c to value of
+    a property, the property should initially have the \c to value, and the
+    animation should set the \c from value in case it is animated:
+
+    \code
+    GridView {
+        ...
+        delegate: Rectangle {
+            opacity: 1 // not necessary because it's the default; but don't set 0
+            ...
+        }
+        populate: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 1000 }
+        }
+    }
+    \endcode
 
     For more details and examples on how to use view transitions, see the ViewTransition
     documentation.

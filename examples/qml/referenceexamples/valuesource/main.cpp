@@ -59,17 +59,9 @@ int main(int argc, char ** argv)
 {
     QCoreApplication app(argc, argv);
 
-    qmlRegisterType<BirthdayPartyAttached>();
-    qmlRegisterType<BirthdayParty>("People", 1,0, "BirthdayParty");
-    qmlRegisterType<HappyBirthdaySong>("People", 1,0, "HappyBirthdaySong");
-    qmlRegisterType<ShoeDescription>();
-    qmlRegisterType<Person>();
-    qmlRegisterType<Boy>("People", 1,0, "Boy");
-    qmlRegisterType<Girl>("People", 1,0, "Girl");
-
     QQmlEngine engine;
     QQmlComponent component(&engine, QUrl("qrc:example.qml"));
-    BirthdayParty *party = qobject_cast<BirthdayParty *>(component.create());
+    auto *party = qobject_cast<BirthdayParty *>(component.create());
 
     if (party && party->host()) {
         qWarning() << party->host()->name() << "is having a birthday!";
@@ -95,9 +87,9 @@ int main(int argc, char ** argv)
         }
 
         party->startParty();
-    } else {
-        qWarning() << component.errors();
+        return QCoreApplication::exec();
     }
 
-    return app.exec();
+    qWarning() << component.errors();
+    return EXIT_FAILURE;
 }

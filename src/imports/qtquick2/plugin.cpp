@@ -39,6 +39,14 @@
 
 #include <QtQml/qqmlextensionplugin.h>
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include <QtQml/private/qqmlengine_p.h>
+#include <QtQmlModels/private/qqmlmodelsmodule_p.h>
+#if QT_CONFIG(qml_worker_script)
+#include <QtQmlWorkerScript/private/qqmlworkerscriptmodule_p.h>
+#endif
+#endif // QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+
 #include <private/qtquick2_p.h>
 
 QT_BEGIN_NAMESPACE
@@ -49,12 +57,24 @@ class QtQuick2Plugin : public QQmlExtensionPlugin
     Q_OBJECT
     Q_PLUGIN_METADATA(IID QQmlExtensionInterface_iid)
 public:
-    QtQuick2Plugin(QObject *parent = nullptr) : QQmlExtensionPlugin(parent) { }
+    QtQuick2Plugin(QObject *parent = nullptr) : QQmlExtensionPlugin(parent)
+    {
+        volatile auto registration = &qml_register_types_QtQuick;
+        Q_UNUSED(registration);
+    }
+
     void registerTypes(const char *uri) override
     {
         Q_ASSERT(QLatin1String(uri) == QLatin1String("QtQuick"));
         Q_UNUSED(uri);
         moduleDefined = true;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        QQmlEnginePrivate::registerQuickTypes();
+        QQmlModelsModule::registerQuickTypes();
+#if QT_CONFIG(qml_worker_script)
+        QQmlWorkerScriptModule::registerQuickTypes();
+#endif
+#endif
         QQmlQtQuick2Module::defineModule();
     }
 

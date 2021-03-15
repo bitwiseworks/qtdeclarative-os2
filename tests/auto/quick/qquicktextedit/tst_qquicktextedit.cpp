@@ -131,8 +131,10 @@ private slots:
     void mouseSelectionMode_accessors();
     void selectByMouse();
     void selectByKeyboard();
+#if QT_CONFIG(shortcut)
     void keyboardSelection_data();
     void keyboardSelection();
+#endif
     void renderType();
     void inputMethodHints();
 
@@ -190,16 +192,19 @@ private slots:
     void insert();
     void remove_data();
     void remove();
-
+#if QT_CONFIG(shortcut)
     void keySequence_data();
     void keySequence();
+#endif
 
     void undo_data();
     void undo();
     void redo_data();
     void redo();
+#if QT_CONFIG(shortcut)
     void undo_keypressevents_data();
     void undo_keypressevents();
+#endif
     void clear();
 
     void baseUrl();
@@ -212,14 +217,18 @@ private slots:
     void doubleSelect_QTBUG_38704();
 
     void padding();
+    void paddingAndWrap();
     void QTBUG_51115_readOnlyResetsSelection();
     void keys_shortcutoverride();
 
+    void transparentSelectionColor();
 private:
     void simulateKeys(QWindow *window, const QList<Key> &keys);
+#if QT_CONFIG(shortcut)
     void simulateKeys(QWindow *window, const QKeySequence &sequence);
+#endif
 
-    void simulateKey(QWindow *, int key, Qt::KeyboardModifiers modifiers = nullptr);
+    void simulateKey(QWindow *, int key, Qt::KeyboardModifiers modifiers = {});
 
     QStringList standard;
     QStringList richText;
@@ -260,6 +269,8 @@ void tst_qquicktextedit::simulateKeys(QWindow *window, const QList<Key> &keys)
     }
 }
 
+#if QT_CONFIG(shortcut)
+
 void tst_qquicktextedit::simulateKeys(QWindow *window, const QKeySequence &sequence)
 {
     for (int i = 0; i < sequence.count(); ++i) {
@@ -276,6 +287,8 @@ QList<Key> &operator <<(QList<Key> &keys, const QKeySequence &sequence)
         keys << Key(sequence[i], QChar());
     return keys;
 }
+
+#endif // QT_CONFIG(shortcut)
 
 template <int N> QList<Key> &operator <<(QList<Key> &keys, const char (&characters)[N])
 {
@@ -916,7 +929,7 @@ void tst_qquicktextedit::hAlignVisual()
     {
         if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
             || (QGuiApplication::platformName() == QLatin1String("minimal")))
-            QEXPECT_FAIL("", "Failure due to grabWindow not functional on offscreen/minimimal platforms", Abort);
+            QEXPECT_FAIL("", "Failure due to grabWindow not functional on offscreen/minimal platforms", Abort);
 
         // Left Align
         QImage image = view.grabWindow();
@@ -1378,7 +1391,7 @@ void tst_qquicktextedit::focusOnPress()
     QCOMPARE(textEditObject->hasActiveFocus(), false);
 
     QPoint centerPoint(window.width()/2, window.height()/2);
-    Qt::KeyboardModifiers noModifiers = nullptr;
+    Qt::KeyboardModifiers noModifiers;
     QTest::mousePress(&window, Qt::LeftButton, noModifiers, centerPoint);
     QGuiApplication::processEvents();
     QCOMPARE(textEditObject->hasFocus(), true);
@@ -2106,30 +2119,31 @@ void tst_qquicktextedit::mouseSelection()
     textEditObject->setFocus(focus);
     textEditObject->setFocusOnPress(focusOnPress);
 
+    // Avoid that the last click from the previous test data and the first click in the
+    // current test data happens so close in time that they are interpreted as a double click.
+    static const int moreThanDoubleClickInterval = QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+
     // press-and-drag-and-release from x1 to x2
     QPoint p1 = textEditObject->positionToRectangle(from).center().toPoint();
     QPoint p2 = textEditObject->positionToRectangle(to).center().toPoint();
     if (clicks == 2)
-        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, p1);
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, p1, moreThanDoubleClickInterval);
     else if (clicks == 3)
-        QTest::mouseDClick(&window, Qt::LeftButton, Qt::NoModifier, p1);
+        QTest::mouseDClick(&window, Qt::LeftButton, Qt::NoModifier, p1, moreThanDoubleClickInterval);
+    // cancel the 500ms delta QTestLib adds in order to properly synthesize a triple click within the required interval
+    QTest::lastMouseTimestamp -= QTest::mouseDoubleClickInterval;
     QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, p1);
-    if (clicks == 2) {
-        // QTBUG-50022: Since qtbase commit beef975, QTestLib avoids generating
-        // double click events by adding 500ms delta to release event timestamps.
-        // Send a double click event by hand to ensure the correct sequence:
-        // press, release, press, _dbl click_, move, release.
-        QMouseEvent dblClickEvent(QEvent::MouseButtonDblClick, p1, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-        QGuiApplication::sendEvent(textEditObject, &dblClickEvent);
-    }
     QTest::mouseMove(&window, p2);
     QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, p2);
     QTRY_COMPARE(textEditObject->selectedText(), selectedText);
 
     // Clicking and shift to clicking between the same points should select the same text.
     textEditObject->setCursorPosition(0);
-    if (clicks > 1)
+    if (clicks > 1) {
         QTest::mouseDClick(&window, Qt::LeftButton, Qt::NoModifier, p1);
+        // cancel the 500ms delta QTestLib adds in order to properly synthesize a triple click within the required interval
+        QTest::lastMouseTimestamp -= QTest::mouseDoubleClickInterval;
+    }
     if (clicks != 2)
         QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, p1);
     QTest::mouseClick(&window, Qt::LeftButton, Qt::ShiftModifier, p2);
@@ -2306,6 +2320,8 @@ void tst_qquicktextedit::selectByKeyboard()
     QCOMPARE(spy.at(2).at(0).toBool(), false);
 }
 
+#if QT_CONFIG(shortcut)
+
 Q_DECLARE_METATYPE(QKeySequence::StandardKey)
 
 void tst_qquicktextedit::keyboardSelection_data()
@@ -2389,6 +2405,8 @@ void tst_qquicktextedit::keyboardSelection()
 
     QCOMPARE(edit->selectedText(), selectedText);
 }
+
+#endif // QT_CONFIG(shortcut)
 
 void tst_qquicktextedit::renderType()
 {
@@ -4819,6 +4837,7 @@ void tst_qquicktextedit::remove()
         QVERIFY(cursorPositionSpy.count() > 0);
 }
 
+#if QT_CONFIG(shortcut)
 
 void tst_qquicktextedit::keySequence_data()
 {
@@ -4982,6 +5001,8 @@ void tst_qquicktextedit::keySequence()
     QCOMPARE(textEdit->text(), expectedText);
     QCOMPARE(textEdit->selectedText(), selectedText);
 }
+
+#endif // QT_CONFIG(shortcut)
 
 #define NORMAL 0
 #define REPLACE_UNTIL_END 1
@@ -5256,6 +5277,8 @@ void tst_qquicktextedit::redo()
     QCOMPARE(spy.count(), 2);
 }
 
+#if QT_CONFIG(shortcut)
+
 void tst_qquicktextedit::undo_keypressevents_data()
 {
     QTest::addColumn<KeyList>("keys");
@@ -5448,6 +5471,8 @@ void tst_qquicktextedit::undo_keypressevents()
     }
     QVERIFY(textEdit->text().isEmpty());
 }
+
+#endif // QT_CONFIG(shortcut)
 
 void tst_qquicktextedit::clear()
 {
@@ -5746,6 +5771,30 @@ void tst_qquicktextedit::padding()
     delete root;
 }
 
+void tst_qquicktextedit::paddingAndWrap()
+{
+    // Check that the document ends up with the correct width if
+    // we set left and right padding after component completed.
+    QScopedPointer<QQuickView> window(new QQuickView);
+    window->setSource(testFileUrl("wordwrap.qml"));
+    QTRY_COMPARE(window->status(), QQuickView::Ready);
+    window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(window.data()));
+    QQuickItem *root = window->rootObject();
+    QVERIFY(root);
+    QQuickTextEdit *obj = qobject_cast<QQuickTextEdit *>(root);
+    QVERIFY(obj != nullptr);
+    QTextDocument *doc = QQuickTextEditPrivate::get(obj)->document;
+
+    QCOMPARE(doc->textWidth(), obj->width());
+    obj->setLeftPadding(10);
+    obj->setRightPadding(10);
+    QCOMPARE(doc->textWidth(), obj->width() - obj->leftPadding() - obj->rightPadding());
+    obj->setLeftPadding(0);
+    obj->setRightPadding(0);
+    QCOMPARE(doc->textWidth(), obj->width());
+}
+
 void tst_qquicktextedit::QTBUG_51115_readOnlyResetsSelection()
 {
     QQuickView view;
@@ -5785,6 +5834,32 @@ void tst_qquicktextedit::keys_shortcutoverride()
     textEdit->setFocus(true);
     QTest::keyPress(&view, Qt::Key_Escape);
     QCOMPARE(root->property("who").value<QString>(), QLatin1String("TextEdit"));
+}
+
+void tst_qquicktextedit::transparentSelectionColor()
+{
+    if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
+        || (QGuiApplication::platformName() == QLatin1String("minimal")))
+        QSKIP("Skipping due to grabToImage not functional on offscreen/minimal platforms");
+
+    QQuickView view;
+    view.setSource(testFileUrl("transparentSelectionColor.qml"));
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QObject *root = view.rootObject();
+    QVERIFY(root);
+
+    QQuickTextEdit *textEdit = root->findChild<QQuickTextEdit *>();
+    QVERIFY(textEdit);
+    textEdit->selectAll();
+
+    QImage img = view.grabWindow();
+    QCOMPARE(img.isNull(), false);
+
+    QColor color = img.pixelColor(int(textEdit->width() / 2), int(textEdit->height()) / 2);
+    QVERIFY(color.red() > 250);
+    QVERIFY(color.blue() < 10);
+    QVERIFY(color.green() < 10);
 }
 
 QTEST_MAIN(tst_qquicktextedit)

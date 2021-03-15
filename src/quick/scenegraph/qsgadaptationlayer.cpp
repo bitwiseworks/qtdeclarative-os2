@@ -50,6 +50,8 @@
 #include <private/qquickprofiler_p.h>
 #include <QElapsedTimer>
 
+#include <qtquick_tracepoints_p.h>
+
 QT_BEGIN_NAMESPACE
 
 static QElapsedTimer qsg_render_timer;
@@ -169,10 +171,13 @@ void QSGDistanceFieldGlyphCache::update()
     if (m_pendingGlyphs.isEmpty())
         return;
 
+    Q_TRACE_SCOPE(QSGDistanceFieldGlyphCache_update, m_pendingGlyphs.size());
+
     bool profileFrames = QSG_LOG_TIME_GLYPH().isDebugEnabled();
     if (profileFrames)
         qsg_render_timer.start();
     Q_QUICK_SG_PROFILE_START(QQuickProfiler::SceneGraphAdaptationLayerFrame);
+    Q_TRACE(QSGDistanceFieldGlyphCache_glyphRender_entry);
 
     QList<QDistanceField> distanceFields;
     const int pendingGlyphsSize = m_pendingGlyphs.size();
@@ -189,8 +194,11 @@ void QSGDistanceFieldGlyphCache::update()
     int count = m_pendingGlyphs.size();
     if (profileFrames)
         renderTime = qsg_render_timer.nsecsElapsed();
+
+    Q_TRACE(QSGDistanceFieldGlyphCache_glyphRender_exit);
     Q_QUICK_SG_PROFILE_RECORD(QQuickProfiler::SceneGraphAdaptationLayerFrame,
                               QQuickProfiler::SceneGraphAdaptationLayerGlyphRender);
+    Q_TRACE(QSGDistanceFieldGlyphCache_glyphStore_entry);
 
     m_pendingGlyphs.reset();
 
@@ -210,6 +218,7 @@ void QSGDistanceFieldGlyphCache::update()
                 int(renderTime / 1000000),
                 int((now - (renderTime / 1000000))));
     }
+    Q_TRACE(QSGDistanceFieldGlyphCache_glyphStore_exit);
     Q_QUICK_SG_PROFILE_END_WITH_PAYLOAD(QQuickProfiler::SceneGraphAdaptationLayerFrame,
                                         QQuickProfiler::SceneGraphAdaptationLayerGlyphStore,
                                         (qint64)count);
@@ -300,6 +309,19 @@ void QSGDistanceFieldGlyphCache::updateTexture(uint oldTex, uint newTex, const Q
         Texture &tex = m_textures[i];
         if (tex.textureId == oldTex) {
             tex.textureId = newTex;
+            tex.size = newTexSize;
+            return;
+        }
+    }
+}
+
+void QSGDistanceFieldGlyphCache::updateRhiTexture(QRhiTexture *oldTex, QRhiTexture *newTex, const QSize &newTexSize)
+{
+    int count = m_textures.count();
+    for (int i = 0; i < count; ++i) {
+        Texture &tex = m_textures[i];
+        if (tex.texture == oldTex) {
+            tex.texture = newTex;
             tex.size = newTexSize;
             return;
         }
@@ -526,14 +548,6 @@ void QSGNodeVisitorEx::visitChildren(QSGNode *node)
 }
 
 #ifndef QT_NO_DEBUG_STREAM
-QDebug operator<<(QDebug debug, const QSGGuiThreadShaderEffectManager::ShaderInfo::InputParameter &p)
-{
-    QDebugStateSaver saver(debug);
-    debug.space();
-    debug << p.semanticName << "semindex" << p.semanticIndex;
-    return debug;
-}
-
 QDebug operator<<(QDebug debug, const QSGGuiThreadShaderEffectManager::ShaderInfo::Variable &v)
 {
     QDebugStateSaver saver(debug);
@@ -563,6 +577,14 @@ QDebug operator<<(QDebug debug, const QSGShaderEffectNode::VariableData &vd)
     return debug;
 }
 #endif
+
+/*!
+    \internal
+ */
+QSGLayer::QSGLayer(QSGTexturePrivate &dd)
+    : QSGDynamicTexture(dd)
+{
+}
 
 QT_END_NAMESPACE
 

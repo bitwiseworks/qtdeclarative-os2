@@ -70,6 +70,8 @@ public:
     static int count_state(QQmlListProperty<QQuickState> *list);
     static QQuickState *at_state(QQmlListProperty<QQuickState> *list, int index);
     static void clear_states(QQmlListProperty<QQuickState> *list);
+    static void replace_states(QQmlListProperty<QQuickState> *list, int index, QQuickState *state);
+    static void removeLast_states(QQmlListProperty<QQuickState> *list);
 
     static void append_transition(QQmlListProperty<QQuickTransition> *list, QQuickTransition *state);
     static int count_transitions(QQmlListProperty<QQuickTransition> *list);
@@ -163,10 +165,13 @@ QList<QQuickState *> QQuickStateGroup::states() const
 QQmlListProperty<QQuickState> QQuickStateGroup::statesProperty()
 {
     Q_D(QQuickStateGroup);
-    return QQmlListProperty<QQuickState>(this, &d->states, &QQuickStateGroupPrivate::append_state,
-                                                       &QQuickStateGroupPrivate::count_state,
-                                                       &QQuickStateGroupPrivate::at_state,
-                                                       &QQuickStateGroupPrivate::clear_states);
+    return QQmlListProperty<QQuickState>(this, &d->states,
+                                         &QQuickStateGroupPrivate::append_state,
+                                         &QQuickStateGroupPrivate::count_state,
+                                         &QQuickStateGroupPrivate::at_state,
+                                         &QQuickStateGroupPrivate::clear_states,
+                                         &QQuickStateGroupPrivate::replace_states,
+                                         &QQuickStateGroupPrivate::removeLast_states);
 }
 
 void QQuickStateGroupPrivate::append_state(QQmlListProperty<QQuickState> *list, QQuickState *state)
@@ -199,6 +204,29 @@ void QQuickStateGroupPrivate::clear_states(QQmlListProperty<QQuickState> *list)
         _this->d_func()->states.at(i)->setStateGroup(nullptr);
     }
     _this->d_func()->states.clear();
+}
+
+void QQuickStateGroupPrivate::replace_states(QQmlListProperty<QQuickState> *list, int index, QQuickState *state)
+{
+    auto *self = qobject_cast<QQuickStateGroup *>(list->object);
+    auto *d = self->d_func();
+    auto *oldState = d->states.at(index);
+    if (oldState != state) {
+        oldState->setStateGroup(nullptr);
+        state->setStateGroup(self);
+        d->states.replace(index, state);
+        if (d->currentState == oldState->name())
+            d->setCurrentStateInternal(state->name(), true);
+    }
+}
+
+void QQuickStateGroupPrivate::removeLast_states(QQmlListProperty<QQuickState> *list)
+{
+    auto *d = qobject_cast<QQuickStateGroup *>(list->object)->d_func();
+    if (d->currentState == d->states.last()->name())
+        d->setCurrentStateInternal(d->states.length() > 1 ? d->states.first()->name() : QString(), true);
+    d->states.last()->setStateGroup(nullptr);
+    d->states.removeLast();
 }
 
 /*!
@@ -311,7 +339,7 @@ void QQuickStateGroup::componentComplete()
         if (!state->isNamed())
             state->setName(QLatin1String("anonymousState") + QString::number(++d->unnamedCount));
 
-        const QString stateName = state->name();
+        QString stateName = state->name();
         if (names.contains(stateName)) {
             qmlWarning(state->parent()) << "Found duplicate state name: " << stateName;
         } else {
@@ -348,10 +376,9 @@ bool QQuickStateGroupPrivate::updateAutoState()
         QQuickState *state = states.at(ii);
         if (state->isWhenKnown()) {
             if (state->isNamed()) {
-                if (state->when() && state->when()->evaluate().toBool()) {
+                if (state->when()) {
                     if (stateChangeDebug())
-                        qWarning() << "Setting auto state due to:"
-                                   << state->when()->expression();
+                        qWarning() << "Setting auto state due to expression";
                     if (currentState != state->name()) {
                         q->setState(state->name());
                         return true;

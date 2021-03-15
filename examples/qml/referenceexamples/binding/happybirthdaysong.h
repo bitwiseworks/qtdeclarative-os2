@@ -52,18 +52,21 @@
 
 #include <QQmlPropertyValueSource>
 #include <QQmlProperty>
+#include <qqml.h>
 
 #include <QStringList>
+#include <qqml.h>
 
 class HappyBirthdaySong : public QObject, public QQmlPropertyValueSource
 {
     Q_OBJECT
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
     Q_INTERFACES(QQmlPropertyValueSource)
+    QML_ELEMENT
 public:
-    HappyBirthdaySong(QObject *parent = 0);
+    HappyBirthdaySong(QObject *parent = nullptr);
 
-    virtual void setTarget(const QQmlProperty &);
+    void setTarget(const QQmlProperty &) override;
 
     QString name() const;
     void setName(const QString &);

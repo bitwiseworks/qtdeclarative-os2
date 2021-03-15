@@ -45,6 +45,7 @@
 # include <QtGui/QOpenGLFunctions>
 #endif
 #include <private/qquickprofiler_p.h>
+#include <qtquick_tracepoints_p.h>
 
 #include <QtCore/QElapsedTimer>
 
@@ -132,6 +133,12 @@ QSGRenderer::QSGRenderer(QSGRenderContext *context)
     , m_current_determinant(1)
     , m_device_pixel_ratio(1)
     , m_context(context)
+    , m_current_uniform_data(nullptr)
+    , m_current_resource_update_batch(nullptr)
+    , m_rhi(nullptr)
+    , m_rt(nullptr)
+    , m_cb(nullptr)
+    , m_rp_desc(nullptr)
     , m_node_updater(nullptr)
     , m_bindable(nullptr)
     , m_changed_emitted(false)
@@ -184,21 +191,30 @@ bool QSGRenderer::isMirrored() const
 
 void QSGRenderer::renderScene(uint fboId)
 {
-#if QT_CONFIG(opengl)
-    if (fboId) {
-        QSGBindableFboId bindable(fboId);
-        renderScene(bindable);
-    } else {
+    if (m_rt) {
         class B : public QSGBindable
         {
         public:
-            void bind() const override { QOpenGLFramebufferObject::bindDefault(); }
+            void bind() const override { }
         } bindable;
         renderScene(bindable);
-    }
+    } else {
+#if QT_CONFIG(opengl)
+        if (fboId) {
+            QSGBindableFboId bindable(fboId);
+            renderScene(bindable);
+        } else {
+            class B : public QSGBindable
+            {
+            public:
+                void bind() const override { QOpenGLFramebufferObject::bindDefault(); }
+            } bindable;
+            renderScene(bindable);
+        }
 #else
-    Q_UNUSED(fboId)
+        Q_UNUSED(fboId)
 #endif
+    }
 }
 
 void QSGRenderer::renderScene(const QSGBindable &bindable)
@@ -206,6 +222,7 @@ void QSGRenderer::renderScene(const QSGBindable &bindable)
     if (!rootNode())
         return;
 
+    Q_TRACE_SCOPE(QSG_renderScene);
     m_is_rendering = true;
 
 
@@ -220,11 +237,14 @@ void QSGRenderer::renderScene(const QSGBindable &bindable)
     m_bindable = &bindable;
     preprocess();
 
+    Q_TRACE(QSG_binding_entry);
     bindable.bind();
     if (profileFrames)
         bindTime = frameTimer.nsecsElapsed();
+    Q_TRACE(QSG_binding_exit);
     Q_QUICK_SG_PROFILE_RECORD(QQuickProfiler::SceneGraphRendererFrame,
                               QQuickProfiler::SceneGraphRendererBinding);
+    Q_TRACE(QSG_render_entry);
 
 #if QT_CONFIG(opengl)
     // Sanity check that attribute registers are disabled
@@ -244,6 +264,7 @@ void QSGRenderer::renderScene(const QSGBindable &bindable)
     render();
     if (profileFrames)
         renderTime = frameTimer.nsecsElapsed();
+    Q_TRACE(QSG_render_exit);
     Q_QUICK_SG_PROFILE_END(QQuickProfiler::SceneGraphRendererFrame,
                            QQuickProfiler::SceneGraphRendererRender);
 
@@ -290,6 +311,8 @@ void QSGRenderer::nodeChanged(QSGNode *node, QSGNode::DirtyState state)
 
 void QSGRenderer::preprocess()
 {
+    Q_TRACE(QSG_preprocess_entry);
+
     m_is_preprocessing = true;
 
     QSGRootNode *root = rootNode();
@@ -299,6 +322,8 @@ void QSGRenderer::preprocess()
     // is in the preprocess list and thus, changes the m_nodes_to_preprocess behind our backs
     // For the default case, when this does not happen, the cost is negligible.
     QSet<QSGNode *> items = m_nodes_to_preprocess;
+
+    m_context->preprocess();
 
     for (QSet<QSGNode *>::const_iterator it = items.constBegin();
          it != items.constEnd(); ++it) {
@@ -316,13 +341,16 @@ void QSGRenderer::preprocess()
     bool profileFrames = QSG_LOG_TIME_RENDERER().isDebugEnabled();
     if (profileFrames)
         preprocessTime = frameTimer.nsecsElapsed();
+    Q_TRACE(QSG_preprocess_exit);
     Q_QUICK_SG_PROFILE_RECORD(QQuickProfiler::SceneGraphRendererFrame,
                               QQuickProfiler::SceneGraphRendererPreprocess);
+    Q_TRACE(QSG_update_entry);
 
     nodeUpdater()->updateStates(root);
 
     if (profileFrames)
         updatePassTime = frameTimer.nsecsElapsed();
+    Q_TRACE(QSG_update_exit);
     Q_QUICK_SG_PROFILE_RECORD(QQuickProfiler::SceneGraphRendererFrame,
                               QQuickProfiler::SceneGraphRendererUpdate);
 

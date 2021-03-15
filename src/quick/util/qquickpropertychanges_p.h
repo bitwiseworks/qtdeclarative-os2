@@ -65,6 +65,8 @@ class Q_QUICK_PRIVATE_EXPORT QQuickPropertyChanges : public QQuickStateOperation
     Q_PROPERTY(QObject *target READ object WRITE setObject)
     Q_PROPERTY(bool restoreEntryValues READ restoreEntryValues WRITE setRestoreEntryValues)
     Q_PROPERTY(bool explicit READ isExplicit WRITE setIsExplicit)
+    QML_NAMED_ELEMENT(PropertyChanges)
+
 public:
     QQuickPropertyChanges();
     ~QQuickPropertyChanges();
@@ -101,12 +103,17 @@ public:
     QQuickPropertyChangesParser()
     : QQmlCustomParser(AcceptsAttachedProperties) {}
 
-    void verifyList(const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit, const QV4::CompiledData::Binding *binding);
+    void verifyList(const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit, const QV4::CompiledData::Binding *binding);
 
-    void verifyBindings(const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &props) override;
-    void applyBindings(QObject *obj, const QQmlRefPointer<QV4::CompiledData::CompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &bindings) override;
+    void verifyBindings(const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &props) override;
+    void applyBindings(QObject *obj, const QQmlRefPointer<QV4::ExecutableCompilationUnit> &compilationUnit, const QList<const QV4::CompiledData::Binding *> &bindings) override;
 };
 
+template<>
+inline QQmlCustomParser *qmlCreateCustomParser<QQuickPropertyChanges>()
+{
+    return new QQuickPropertyChangesParser;
+}
 
 QT_END_NAMESPACE
 

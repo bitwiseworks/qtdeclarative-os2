@@ -82,9 +82,13 @@ class QQuickWindowPrivate;
 class QQuickWindowRenderLoop;
 class QSGRenderLoop;
 class QTouchEvent;
+class QRhi;
+class QRhiSwapChain;
+class QRhiRenderBuffer;
+class QRhiRenderPassDescriptor;
 
 //Make it easy to identify and customize the root item if needed
-class QQuickRootItem : public QQuickItem
+class Q_QUICK_PRIVATE_EXPORT QQuickRootItem : public QQuickItem
 {
     Q_OBJECT
 public:
@@ -108,7 +112,8 @@ public:
     Q_DECLARE_PUBLIC(QQuickWindow)
 
     enum CustomEvents {
-        FullUpdateRequest = QEvent::User + 1
+        FullUpdateRequest = QEvent::User + 1,
+        TriggerContextCreationFailure = QEvent::User + 2
     };
 
     static inline QQuickWindowPrivate *get(QQuickWindow *c) { return c->d_func(); }
@@ -129,8 +134,9 @@ public:
     // Keeps track of the item currently receiving mouse events
 #if QT_CONFIG(cursor)
     QQuickItem *cursorItem;
+    QQuickPointerHandler *cursorHandler;
 #endif
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     QQuickDragGrabber *dragGrabber;
 #endif
     int touchMouseId;
@@ -186,13 +192,13 @@ public:
                         Qt::KeyboardModifiers modifiers, ulong timestamp, bool accepted);
     bool clearHover(ulong timestamp = 0);
 
-#if QT_CONFIG(draganddrop)
+#if QT_CONFIG(quick_draganddrop)
     void deliverDragEvent(QQuickDragGrabber *, QEvent *);
-    bool deliverDragEvent(QQuickDragGrabber *, QQuickItem *, QDragMoveEvent *);
+    bool deliverDragEvent(QQuickDragGrabber *, QQuickItem *, QDragMoveEvent *, QVarLengthArray<QQuickItem*, 64> *currentGrabItems = nullptr);
 #endif
 #if QT_CONFIG(cursor)
     void updateCursor(const QPointF &scenePos);
-    QQuickItem *findCursorItem(QQuickItem *item, const QPointF &scenePos);
+    QPair<QQuickItem*, QQuickPointerHandler*> findCursorItemAndHandler(QQuickItem *item, const QPointF &scenePos) const;
 #endif
 
     QList<QQuickItem*> hoverItems;
@@ -202,8 +208,8 @@ public:
     };
     Q_DECLARE_FLAGS(FocusOptions, FocusOption)
 
-    void setFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = nullptr);
-    void clearFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = nullptr);
+    void setFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = { });
+    void clearFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = { });
     static void notifyFocusChangesRecur(QQuickItem **item, int remaining);
     void clearFocusObject() override;
 
@@ -215,7 +221,7 @@ public:
     void polishItems();
     void forcePolish();
     void syncSceneGraph();
-    void renderSceneGraph(const QSize &size);
+    void renderSceneGraph(const QSize &size, const QSize &surfaceSize = QSize());
 
     bool isRenderable() const;
 
@@ -250,7 +256,7 @@ public:
 
     QSGRenderLoop *windowManager;
     QQuickRenderControl *renderControl;
-    QQuickAnimatorController *animationController;
+    QScopedPointer<QQuickAnimatorController> animationController;
     QScopedPointer<QTouchEvent> delayedTouch;
 
     int pointerEventRecursionGuard;
@@ -284,25 +290,7 @@ public:
 
     static bool dragOverThreshold(qreal d, Qt::Axis axis, QMouseEvent *event, int startDragThreshold = -1);
 
-    template <typename TEventPoint>
-    static bool dragOverThreshold(qreal d, Qt::Axis axis, const TEventPoint *p, int startDragThreshold = -1)
-    {
-        QStyleHints *styleHints = qApp->styleHints();
-        bool overThreshold = qAbs(d) > (startDragThreshold >= 0 ? startDragThreshold : styleHints->startDragDistance());
-        const bool dragVelocityLimitAvailable = (styleHints->startDragVelocity() > 0);
-        if (!overThreshold && dragVelocityLimitAvailable) {
-            qreal velocity = axis == Qt::XAxis ? p->velocity().x() : p->velocity().y();
-            overThreshold |= qAbs(velocity) > styleHints->startDragVelocity();
-        }
-        return overThreshold;
-    }
-
-    static bool dragOverThreshold(const QQuickEventPoint *point)
-    {
-        QPointF delta = point->scenePosition() - point->scenePressPosition();
-        return (QQuickWindowPrivate::dragOverThreshold(delta.x(), Qt::XAxis, point) ||
-                QQuickWindowPrivate::dragOverThreshold(delta.y(), Qt::YAxis, point));
-    }
+    static bool dragOverThreshold(qreal d, Qt::Axis axis, const QTouchEvent::TouchPoint *tp, int startDragThreshold = -1);
 
     static bool dragOverThreshold(QVector2D delta);
 
@@ -311,11 +299,18 @@ public:
     static int data_count(QQmlListProperty<QObject> *);
     static QObject *data_at(QQmlListProperty<QObject> *, int);
     static void data_clear(QQmlListProperty<QObject> *);
+    static void data_replace(QQmlListProperty<QObject> *, int, QObject *);
+    static void data_removeLast(QQmlListProperty<QObject> *);
 
     static void contextCreationFailureMessage(const QSurfaceFormat &format,
                                               QString *translatedMessage,
-                                              QString *untranslatedMessage,
-                                              bool isEs);
+                                              QString *untranslatedMessage);
+    static void rhiCreationFailureMessage(const QString &backendName,
+                                          QString *translatedMessage,
+                                          QString *untranslatedMessage);
+
+    static void emitBeforeRenderPassRecording(void *ud);
+    static void emitAfterRenderPassRecording(void *ud);
 
     QMutex renderJobMutex;
     QList<QRunnable *> beforeSynchronizingJobs;
@@ -325,6 +320,15 @@ public:
     QList<QRunnable *> afterSwapJobs;
 
     void runAndClearJobs(QList<QRunnable *> *jobs);
+
+    QQuickWindow::GraphicsStateInfo rhiStateInfo;
+    QRhi *rhi = nullptr;
+    QRhiSwapChain *swapchain = nullptr;
+    QRhiRenderBuffer *depthStencilForSwapchain = nullptr;
+    QRhiRenderPassDescriptor *rpDescForSwapchain = nullptr;
+    uint hasActiveSwapchain : 1;
+    uint hasRenderableSwapchain : 1;
+    uint swapchainJustBecameRenderable : 1;
 
 private:
     static void cleanupNodesOnShutdown(QQuickItem *);

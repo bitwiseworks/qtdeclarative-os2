@@ -73,7 +73,7 @@ void tst_qquickrectangle::color()
 
     if ((QGuiApplication::platformName() == QLatin1String("offscreen"))
         || (QGuiApplication::platformName() == QLatin1String("minimal")))
-        QEXPECT_FAIL("", "Failure due to grabWindow not functional on offscreen/minimimal platforms", Abort);
+        QEXPECT_FAIL("", "Failure due to grabWindow not functional on offscreen/minimal platforms", Abort);
 
     QImage image = view.grabWindow();
     QVERIFY(image.pixel(0,0) == QColor("#020202").rgba());
@@ -189,9 +189,11 @@ void tst_qquickrectangle::gradient_preset()
     QVERIFY(stringRect->gradient().isString());
     QCOMPARE(stringRect->gradient().toString(), QLatin1String("NightFade"));
 
-    QQuickRectangle *invalidRect = view.rootObject()->findChild<QQuickRectangle *>("invalid");
-    QVERIFY(invalidRect);
-    QVERIFY(invalidRect->gradient().isUndefined());
+    for (int i = 1; i <= 5; ++i) {
+        QQuickRectangle *invalidRect = view.rootObject()->findChild<QQuickRectangle *>(qPrintable(QString("invalid%1").arg(i)));
+        QVERIFY(invalidRect);
+        QVERIFY(invalidRect->gradient().isUndefined());
+    }
 }
 
 void tst_qquickrectangle::antialiasing()

@@ -32,6 +32,7 @@
 #include <QtQuick/qquickview.h>
 #include <QtQuick/qquickitem.h>
 #include <private/qqmlimport_p.h>
+#include <private/qqmlengine_p.h>
 #include "../../shared/util.h"
 
 class tst_QQmlImport : public QQmlDataTest
@@ -46,6 +47,7 @@ private slots:
     void completeQmldirPaths();
     void interceptQmldir();
     void singletonVersionResolution();
+    void removeDynamicPlugin();
     void cleanup();
 };
 
@@ -78,7 +80,7 @@ void tst_QQmlImport::testDesignerSupported()
     QVERIFY(window->errors().isEmpty());
 
     QString warningString("%1:30:1: module does not support the designer \"MyPluginUnsupported\" \n     import MyPluginUnsupported 1.0\r \n     ^ ");
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
     warningString.remove('\r');
 #endif
     warningString = warningString.arg(testFileUrl("testfile_unsupported.qml").toString());
@@ -130,6 +132,9 @@ void tst_QQmlImport::uiFormatLoading()
 
 void tst_QQmlImport::importPathOrder()
 {
+#ifdef Q_OS_ANDROID
+    QSKIP("QLibraryInfo::location(QLibraryInfo::Qml2ImportsPath) returns bogus path on Android, but its nevertheless unusable.");
+#endif
     QStringList expectedImportPaths;
     QString appDirPath = QCoreApplication::applicationDirPath();
     QString qml2Imports = QLibraryInfo::location(QLibraryInfo::Qml2ImportsPath);
@@ -255,6 +260,25 @@ void tst_QQmlImport::singletonVersionResolution()
         auto item = qobject_cast<QQuickItem*>(obj.get());
         QCOMPARE(item->width(), 50);
     }
+}
+
+void tst_QQmlImport::removeDynamicPlugin()
+{
+    qmlClearTypeRegistrations();
+    QQmlEngine engine;
+    {
+        // Load something that adds a dynamic plugin
+        QQmlComponent component(&engine);
+        component.setData(QByteArray("import QtTest 1.0; TestResult{}"), QUrl());
+        QVERIFY(component.isReady());
+    }
+    QQmlImportDatabase *imports = &QQmlEnginePrivate::get(&engine)->importDatabase;
+    const QStringList &plugins = imports->dynamicPlugins();
+    QVERIFY(!plugins.isEmpty());
+    for (const QString &plugin : plugins)
+        QVERIFY(imports->removeDynamicPlugin(plugin));
+    QVERIFY(imports->dynamicPlugins().isEmpty());
+    qmlClearTypeRegistrations();
 }
 
 

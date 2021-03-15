@@ -107,7 +107,7 @@ void QQuickFolderListModelPrivate::updateSorting()
 {
     Q_Q(QQuickFolderListModel);
 
-    QDir::SortFlags flags = nullptr;
+    QDir::SortFlags flags;
 
     switch (sortField) {
         case QQuickFolderListModel::Unsorted:
@@ -255,7 +255,8 @@ QString QQuickFolderListModelPrivate::resolvePath(const QUrl &path)
     \list
     \li \c fileName
     \li \c filePath
-    \li \c fileURL (since Qt 5.2)
+    \li \c fileURL (since Qt 5.2; deprecated since Qt 5.15)
+    \li \c fileUrl (since Qt 5.15)
     \li \c fileBaseName
     \li \c fileSuffix
     \li \c fileSize
@@ -334,7 +335,8 @@ QQuickFolderListModel::QQuickFolderListModel(QObject *parent)
     d->roleNames[FileLastModifiedRole] = "fileModified";
     d->roleNames[FileLastReadRole] = "fileAccessed";
     d->roleNames[FileIsDirRole] = "fileIsDir";
-    d->roleNames[FileUrlRole] = "fileURL";
+    d->roleNames[FileUrlRole] = "fileUrl";
+    d->roleNames[FileURLRole] = "fileURL";
     d->init();
 }
 
@@ -377,6 +379,7 @@ QVariant QQuickFolderListModel::data(const QModelIndex &index, int role) const
             rv = d->data.at(index.row()).isDir();
             break;
         case FileUrlRole:
+        case FileURLRole:
             rv = QUrl::fromLocalFile(d->data.at(index.row()).filePath());
             break;
         default:
@@ -539,6 +542,8 @@ QStringList QQuickFolderListModel::nameFilters() const
 void QQuickFolderListModel::setNameFilters(const QStringList &filters)
 {
     Q_D(QQuickFolderListModel);
+    if (d->nameFilters == filters)
+        return;
     d->fileInfoThread.setNameFilters(filters);
     d->nameFilters = filters;
 }
@@ -731,6 +736,7 @@ void  QQuickFolderListModel::setShowDotAndDotDot(bool on)
 
     if (on != d->showDotAndDotDot) {
         d->fileInfoThread.setShowDotAndDotDot(on);
+        d->showDotAndDotDot = on;
     }
 }
 
@@ -756,6 +762,7 @@ void QQuickFolderListModel::setShowHidden(bool on)
 
     if (on != d->showHidden) {
         d->fileInfoThread.setShowHidden(on);
+        d->showHidden = on;
     }
 }
 
@@ -781,6 +788,7 @@ void QQuickFolderListModel::setShowOnlyReadable(bool on)
 
     if (on != d->showOnlyReadable) {
         d->fileInfoThread.setShowOnlyReadable(on);
+        d->showOnlyReadable = on;
     }
 }
 
@@ -805,6 +813,7 @@ void QQuickFolderListModel::setCaseSensitive(bool on)
 
     if (on != d->caseSensitive) {
         d->fileInfoThread.setCaseSensitive(on);
+        d->caseSensitive = on;
     }
 }
 
@@ -852,7 +861,7 @@ QQuickFolderListModel::Status QQuickFolderListModel::status() const
     \qmlproperty bool FolderListModel::sortCaseSensitive
     \since 5.12
 
-    If set to true, the sort is case sensitive. This property is true by default.
+    If set to \c true, the sort is case sensitive. This property is \c true by default.
 */
 
 bool QQuickFolderListModel::sortCaseSensitive() const
@@ -874,13 +883,14 @@ void QQuickFolderListModel::setSortCaseSensitive(bool on)
 /*!
     \qmlmethod var FolderListModel::get(int index, string property)
 
-    Get the folder property for the given index. The following properties
-    are available.
+    Returns the folder \a property for the given \a index. The following properties
+    are available:
 
     \list
         \li \c fileName
         \li \c filePath
-        \li \c fileURL (since Qt 5.2)
+        \li \c fileURL (since Qt 5.2; deprecated since Qt 5.15)
+        \li \c fileUrl (since Qt 5.15)
         \li \c fileBaseName
         \li \c fileSuffix
         \li \c fileSize
@@ -902,7 +912,7 @@ QVariant QQuickFolderListModel::get(int idx, const QString &property) const
     \qmlmethod int FolderListModel::indexOf(url file)
     \since 5.6
 
-    Get the index of the given file URL if the model contains it,
+    Returns the index of the given \a file URL if the model contains it,
     or -1 if not.
 */
 int QQuickFolderListModel::indexOf(const QUrl &file) const

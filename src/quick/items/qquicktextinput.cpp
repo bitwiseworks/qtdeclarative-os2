@@ -1009,9 +1009,10 @@ void QQuickTextInput::setAutoScroll(bool b)
     an acceptable or intermediate state. The accepted signal will only be sent
     if the text is in an acceptable state when enter is pressed.
 
-    Currently supported validators are IntValidator, DoubleValidator and
-    RegExpValidator. An example of using validators is shown below, which allows
-    input of integers between 11 and 31 into the text input:
+    Currently supported validators are IntValidator, DoubleValidator,
+    RegExpValidator and RegularExpressionValidator. An example of using
+    validators is shown below, which allows input of integers between 11 and 31
+    into the text input:
 
     \code
     import QtQuick 2.0
@@ -1139,7 +1140,10 @@ QString QQuickTextInput::inputMask() const
 void QQuickTextInput::setInputMask(const QString &im)
 {
     Q_D(QQuickTextInput);
-    if (d->inputMask() == im)
+    QString canonicalInputMask = im;
+    if (im.lastIndexOf(QLatin1Char(';')) == -1)
+        canonicalInputMask.append(QLatin1String("; "));
+    if (d->inputMask() == canonicalInputMask)
         return;
 
     d->setInputMask(im);
@@ -1167,8 +1171,6 @@ bool QQuickTextInput::hasAcceptableInput() const
     Note that if there is a \l validator or \l inputMask set on the text
     input, the signal will only be emitted if the input is in an acceptable
     state.
-
-    The corresponding handler is \c onAccepted.
 */
 
 /*!
@@ -1180,8 +1182,6 @@ bool QQuickTextInput::hasAcceptableInput() const
     inputMask set on the text input and enter/return is pressed, this
     signal will only be emitted if the input follows
     the inputMask and the validator returns an acceptable state.
-
-    The corresponding handler is \c onEditingFinished.
 */
 
 /*!
@@ -1191,8 +1191,6 @@ bool QQuickTextInput::hasAcceptableInput() const
     This signal is emitted whenever the text is edited. Unlike \c textChanged(),
     this signal is not emitted when the text is changed programmatically, for example,
     by changing the value of the \c text property or by calling \c clear().
-
-    The corresponding handler is \c onTextEdited.
 */
 
 #if QT_CONFIG(im)
@@ -1358,8 +1356,8 @@ void QQuickTextInput::createCursor()
 /*!
     \qmlmethod rect QtQuick::TextInput::positionToRectangle(int pos)
 
-    This function takes a character position and returns the rectangle that the
-    cursor would occupy, if it was placed at that character position.
+    This function takes a character position \a pos and returns the rectangle
+    that the cursor would occupy, if it was placed at that character position.
 
     This is similar to setting the cursorPosition, and then querying the cursor
     rectangle, but the cursorPosition is not changed.
@@ -1389,10 +1387,10 @@ QRectF QQuickTextInput::positionToRectangle(int pos) const
 }
 
 /*!
-    \qmlmethod int QtQuick::TextInput::positionAt(real x, real y, CursorPosition position = CursorBetweenCharacters)
+    \qmlmethod int QtQuick::TextInput::positionAt(real x, real y, CursorPosition position)
 
     This function returns the character position at
-    x and y pixels from the top left  of the textInput. Position 0 is before the
+    \a x and \a y pixels from the top left of the textInput. Position 0 is before the
     first character, position 1 is after the first character but before the second,
     and so on until position text.length, which is after all characters.
 
@@ -1402,12 +1400,13 @@ QRectF QQuickTextInput::positionToRectangle(int pos) const
     the first line and if it is below the text the position of the nearest character
     on the last line will be returned.
 
-    The cursor position type specifies how the cursor position should be resolved.
+    The cursor \a position parameter specifies how the cursor position should be resolved:
 
-    \list
-    \li TextInput.CursorBetweenCharacters - Returns the position between characters that is nearest x.
-    \li TextInput.CursorOnCharacter - Returns the position before the character that is nearest x.
-    \endlist
+    \value TextInput.CursorBetweenCharacters
+           Returns the position between characters that is nearest x.
+           This is the default value.
+    \value TextInput.CursorOnCharacter
+           Returns the position before the character that is nearest x.
 */
 
 void QQuickTextInput::positionAt(QQmlV4Function *args) const
@@ -1630,7 +1629,7 @@ void QQuickTextInput::mouseReleaseEvent(QMouseEvent *event)
     if (QGuiApplication::clipboard()->supportsSelection()) {
         if (event->button() == Qt::LeftButton) {
             d->copy(QClipboard::Selection);
-        } else if (!d->m_readOnly && event->button() == Qt::MidButton) {
+        } else if (!d->m_readOnly && event->button() == Qt::MiddleButton) {
             d->deselect();
             d->insert(QGuiApplication::clipboard()->text(QClipboard::Selection));
         }
@@ -1956,7 +1955,7 @@ QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property) const
     return inputMethodQuery(property, QVariant());
 }
 
-QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
+QVariant QQuickTextInput::inputMethodQuery(Qt::InputMethodQuery property, const QVariant &argument) const
 {
     Q_D(const QQuickTextInput);
     switch (property) {
@@ -2131,7 +2130,7 @@ void QQuickTextInput::redo()
 /*!
     \qmlmethod QtQuick::TextInput::insert(int position, string text)
 
-    Inserts \a text into the TextInput at position.
+    Inserts \a text into the TextInput at \a position.
 */
 
 void QQuickTextInput::insert(int position, const QString &text)
@@ -2257,8 +2256,8 @@ void QQuickTextInput::remove(int start, int end)
             d->m_cursor -= qMin(d->m_cursor, end) - start;
         if (d->m_selstart > start)
             d->m_selstart -= qMin(d->m_selstart, end) - start;
-        if (d->m_selend > end)
-            d->m_selend -= qMin(d->m_selend, end) - start;
+        if (d->m_selend >= end)
+            d->m_selend -= end - start;
     }
     d->addCommand(QQuickTextInputPrivate::Command(
             QQuickTextInputPrivate::SetSelection, d->m_cursor, 0, d->m_selstart, d->m_selend));
@@ -2538,7 +2537,7 @@ void QQuickTextInput::moveCursorSelection(int position)
 }
 
 /*!
-    \qmlmethod QtQuick::TextInput::moveCursorSelection(int position, SelectionMode mode = TextInput.SelectCharacters)
+    \qmlmethod QtQuick::TextInput::moveCursorSelection(int position, SelectionMode mode)
 
     Moves the cursor to \a position and updates the selection according to the optional \a mode
     parameter.  (To only move the cursor, set the \l cursorPosition property.)
@@ -2549,7 +2548,7 @@ void QQuickTextInput::moveCursorSelection(int position)
     text range.
 
     The selection mode specifies whether the selection is updated on a per character or a per word
-    basis.  If not specified the selection mode will default to TextInput.SelectCharacters.
+    basis.  If not specified the selection mode will default to \c {TextInput.SelectCharacters}.
 
     \list
     \li TextInput.SelectCharacters - Sets either the selectionStart or selectionEnd (whichever was at
@@ -2896,8 +2895,7 @@ void QQuickTextInputPrivate::updateDisplayText(bool forceUpdate)
     // characters)
     QChar* uc = str.data();
     for (int i = 0; i < str.length(); ++i) {
-        if ((uc[i].unicode() < 0x20 && uc[i] != QChar::Tabulation)
-            || uc[i] == QChar::LineSeparator
+        if (uc[i] == QChar::LineSeparator
             || uc[i] == QChar::ParagraphSeparator
             || uc[i] == QChar::ObjectReplacementCharacter)
             uc[i] = QChar(0x0020);
@@ -3952,7 +3950,7 @@ bool QQuickTextInputPrivate::isValidInput(QChar key, QChar mask) const
             return true;
         break;
     case 'X':
-        if (key.isPrint())
+        if (key.isPrint() && key != m_blank)
             return true;
         break;
     case 'x':
@@ -4690,6 +4688,18 @@ void QQuickTextInput::clear()
 
     These properties hold the padding around the content. This space is reserved
     in addition to the contentWidth and contentHeight.
+
+    The individual padding properties assume the value of the \c padding
+    property unless they are set explicitly. For example, if \c padding is
+    set to \c 4 and \c leftPadding to \c 8, \c 8 will be used as the left
+    padding.
+
+    \note If an explicit width or height is given to a TextInput, care must be
+    taken to ensure it is large enough to accommodate the relevant padding
+    values. For example: if \c topPadding and \c bottomPadding are set to
+    \c 10, but the height of the TextInput is only set to \c 20, the text will
+    not have enough vertical space in which to be rendered, and will appear
+    clipped.
 */
 qreal QQuickTextInput::padding() const
 {

@@ -203,12 +203,13 @@ class QQuickStatePrivate : public QObjectPrivate
 
 public:
     QQuickStatePrivate()
-    : named(false), inState(false), group(nullptr) {}
+        : when(false), whenKnown(false), named(false), inState(false), group(nullptr) {}
 
     typedef QList<QQuickSimpleAction> SimpleActionList;
 
     QString name;
-    QQmlBinding::Ptr when;
+    bool when;
+    bool whenKnown;
     bool named;
 
     struct OperationGuard : public QQmlGuard<QQuickStateOperation>
@@ -231,9 +232,8 @@ public:
     }
     static void operations_clear(QQmlListProperty<QQuickStateOperation> *prop) {
         QList<OperationGuard> *list = static_cast<QList<OperationGuard> *>(prop->data);
-        QMutableListIterator<OperationGuard> listIterator(*list);
-        while(listIterator.hasNext())
-            listIterator.next()->setState(nullptr);
+        for (auto &e : *list)
+            e->setState(nullptr);
         list->clear();
     }
     static int operations_count(QQmlListProperty<QQuickStateOperation> *prop) {
@@ -243,6 +243,23 @@ public:
     static QQuickStateOperation *operations_at(QQmlListProperty<QQuickStateOperation> *prop, int index) {
         QList<OperationGuard> *list = static_cast<QList<OperationGuard> *>(prop->data);
         return list->at(index);
+    }
+    static void operations_replace(QQmlListProperty<QQuickStateOperation> *prop, int index,
+                                   QQuickStateOperation *op) {
+        QList<OperationGuard> *list = static_cast<QList<OperationGuard> *>(prop->data);
+        auto &guard = list->at(index);
+        if (guard.object() == op) {
+            op->setState(qobject_cast<QQuickState*>(prop->object));
+        } else {
+            list->at(index)->setState(nullptr);
+            op->setState(qobject_cast<QQuickState*>(prop->object));
+            list->replace(index, OperationGuard(op, list));
+        }
+    }
+    static void operations_removeLast(QQmlListProperty<QQuickStateOperation> *prop) {
+        QList<OperationGuard> *list = static_cast<QList<OperationGuard> *>(prop->data);
+        list->last()->setState(nullptr);
+        list->removeLast();
     }
 
     QQuickTransitionManager transitionManager;
