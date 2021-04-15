@@ -1,6 +1,6 @@
 CXX_MODULE = qml
 TARGET = sharedimageplugin
-os2:TARGET_SHORT = qmlsip
+os2:TARGET_SHORT = shimgp
 TARGETPATH = Qt/labs/sharedimage
 IMPORT_VERSION = 1.0
 

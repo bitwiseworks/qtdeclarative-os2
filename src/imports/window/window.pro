@@ -1,6 +1,6 @@
 CXX_MODULE = qml
 TARGET  = windowplugin
-os2:TARGET_SHORT = qmlwp
+os2:TARGET_SHORT = wndp
 TARGETPATH = QtQuick/Window.2
 IMPORT_VERSION = 2.$$QT_MINOR_VERSION
 

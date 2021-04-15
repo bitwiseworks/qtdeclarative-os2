@@ -1,6 +1,6 @@
 CXX_MODULE = qml
 TARGET  = labsmodelsplugin
-os2:TARGET_SHORT = qmllmp
+os2:TARGET_SHORT = lmodp
 TARGETPATH = Qt/labs/qmlmodels
 IMPORT_VERSION = 1.0
 

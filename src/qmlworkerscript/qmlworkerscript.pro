@@ -1,4 +1,6 @@
 TARGET = QtQmlWorkerScript
+os2:TARGET_SHORT = QtQmlW
+
 QT = core-private qml-private
 
 QMAKE_DOCS = $$PWD/doc/qtqmlworkerscript.qdocconf

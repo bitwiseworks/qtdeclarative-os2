@@ -1,4 +1,6 @@
 TARGET = QtQmlModels
+os2:TARGET_SHORT = QtQmlM
+
 QT = core-private qml-private
 
 QMAKE_DOCS = $$PWD/doc/qtqmlmodels.qdocconf
