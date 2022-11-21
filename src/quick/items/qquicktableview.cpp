@@ -642,6 +642,28 @@ int QQuickTableViewPrivate::nextVisibleEdgeIndex(Qt::Edge edge, int startIndex)
     return foundIndex;
 }
 
+bool QQuickTableViewPrivate::allColumnsLoaded()
+{
+    // Returns true if all the columns in the model (that are not
+    // hidden by the columnWidthProvider) are currently loaded and visible.
+    const bool firstColumnLoaded = nextVisibleEdgeIndexAroundLoadedTable(Qt::LeftEdge) == kEdgeIndexAtEnd;
+    if (!firstColumnLoaded)
+        return false;
+    bool lastColumnLoaded = nextVisibleEdgeIndexAroundLoadedTable(Qt::RightEdge) == kEdgeIndexAtEnd;
+    return lastColumnLoaded;
+}
+
+bool QQuickTableViewPrivate::allRowsLoaded()
+{
+    // Returns true if all the rows in the model (that are not hidden
+    // by the columnWidthProvider) are currently loaded and visible.
+    const bool firstColumnLoaded = nextVisibleEdgeIndexAroundLoadedTable(Qt::TopEdge) == kEdgeIndexAtEnd;
+    if (!firstColumnLoaded)
+        return false;
+    bool lastColumnLoaded = nextVisibleEdgeIndexAroundLoadedTable(Qt::BottomEdge) == kEdgeIndexAtEnd;
+    return lastColumnLoaded;
+}
+
 void QQuickTableViewPrivate::updateContentWidth()
 {
     // Note that we actually never really know what the content size / size of the full table will
@@ -927,43 +949,70 @@ void QQuickTableViewPrivate::syncLoadedTableRectFromLoadedTable()
 
 QQuickTableViewPrivate::RebuildOptions QQuickTableViewPrivate::checkForVisibilityChanges()
 {
-    // Go through all columns from first to last, find the columns that used
-    // to be hidden and not loaded, and check if they should become visible
-    // (and vice versa). If there is a change, we need to rebuild.
-    RebuildOptions rebuildOptions = RebuildOption::None;
-
-    for (int column = leftColumn(); column <= rightColumn(); ++column) {
-        const bool wasVisibleFromBefore = loadedColumns.contains(column);
-        const bool isVisibleNow = !qFuzzyIsNull(getColumnWidth(column));
-        if (wasVisibleFromBefore == isVisibleNow)
-            continue;
-
-        // A column changed visibility. This means that it should
-        // either be loaded or unloaded. So we need a rebuild.
-        qCDebug(lcTableViewDelegateLifecycle) << "Column" << column << "changed visibility to" << isVisibleNow;
-        rebuildOptions.setFlag(RebuildOption::ViewportOnly);
-        if (column == leftColumn()) {
-            // The first loaded column should now be hidden. This means that we
-            // need to calculate which column should now be first instead.
-            rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftColumn);
-        }
-        break;
+    // This function will check if there are any visibility changes among
+    // the _already loaded_ rows and columns. Note that there can be rows
+    // and columns to the bottom or right that was not loaded, but should
+    // now become visible (in case there is free space around the table).
+    if (loadedItems.isEmpty()) {
+        // Report no changes
+        return RebuildOption::None;
     }
 
-    // Go through all rows from first to last, and do the same as above
-    for (int row = topRow(); row <= bottomRow(); ++row) {
-        const bool wasVisibleFromBefore = loadedRows.contains(row);
-        const bool isVisibleNow = !qFuzzyIsNull(getRowHeight(row));
-        if (wasVisibleFromBefore == isVisibleNow)
-            continue;
+    RebuildOptions rebuildOptions = RebuildOption::None;
 
-        // A row changed visibility. This means that it should
-        // either be loaded or unloaded. So we need a rebuild.
-        qCDebug(lcTableViewDelegateLifecycle) << "Row" << row << "changed visibility to" << isVisibleNow;
+    if (loadedTableOuterRect.x() == origin.x() && leftColumn() != 0) {
+        // Since the left column is at the origin of the viewport, but still not the first
+        // column in the model, we need to calculate a new left column since there might be
+        // columns in front of it that used to be hidden, but should now be visible (QTBUG-93264).
         rebuildOptions.setFlag(RebuildOption::ViewportOnly);
-        if (row == topRow())
-            rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftRow);
-        break;
+        rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftColumn);
+    } else {
+        // Go through all loaded columns from first to last, find the columns that used
+        // to be hidden and not loaded, and check if they should become visible
+        // (and vice versa). If there is a change, we need to rebuild.
+        for (int column = leftColumn(); column <= rightColumn(); ++column) {
+            const bool wasVisibleFromBefore = loadedColumns.contains(column);
+            const bool isVisibleNow = !qFuzzyIsNull(getColumnWidth(column));
+            if (wasVisibleFromBefore == isVisibleNow)
+                continue;
+
+            // A column changed visibility. This means that it should
+            // either be loaded or unloaded. So we need a rebuild.
+            qCDebug(lcTableViewDelegateLifecycle) << "Column" << column << "changed visibility to" << isVisibleNow;
+            rebuildOptions.setFlag(RebuildOption::ViewportOnly);
+            if (column == leftColumn()) {
+                // The first loaded column should now be hidden. This means that we
+                // need to calculate which column should now be first instead.
+                rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftColumn);
+            }
+            break;
+        }
+    }
+
+    if (loadedTableOuterRect.y() == origin.y() && topRow() != 0) {
+        // Since the top row is at the origin of the viewport, but still not the first
+        // row in the model, we need to calculate a new top row since there might be
+        // rows in front of it that used to be hidden, but should now be visible (QTBUG-93264).
+        rebuildOptions.setFlag(RebuildOption::ViewportOnly);
+        rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftRow);
+    } else {
+        // Go through all loaded rows from first to last, find the rows that used
+        // to be hidden and not loaded, and check if they should become visible
+        // (and vice versa). If there is a change, we need to rebuild.
+        for (int row = topRow(); row <= bottomRow(); ++row) {
+            const bool wasVisibleFromBefore = loadedRows.contains(row);
+            const bool isVisibleNow = !qFuzzyIsNull(getRowHeight(row));
+            if (wasVisibleFromBefore == isVisibleNow)
+                continue;
+
+            // A row changed visibility. This means that it should
+            // either be loaded or unloaded. So we need a rebuild.
+            qCDebug(lcTableViewDelegateLifecycle) << "Row" << row << "changed visibility to" << isVisibleNow;
+            rebuildOptions.setFlag(RebuildOption::ViewportOnly);
+            if (row == topRow())
+                rebuildOptions.setFlag(RebuildOption::CalculateNewTopLeftRow);
+            break;
+        }
     }
 
     return rebuildOptions;
@@ -971,9 +1020,6 @@ QQuickTableViewPrivate::RebuildOptions QQuickTableViewPrivate::checkForVisibilit
 
 void QQuickTableViewPrivate::forceLayout()
 {
-    if (loadedItems.isEmpty())
-        return;
-
     clearEdgeSizeCache();
     RebuildOptions rebuildOptions = RebuildOption::None;
 
@@ -1760,11 +1806,8 @@ void QQuickTableViewPrivate::calculateTopLeft(QPoint &topLeftCell, QPointF &topL
         const auto syncView_d = syncView->d_func();
 
         if (syncView_d->loadedItems.isEmpty()) {
-            // The sync view contains no loaded items. This probably means
-            // that it has not been rebuilt yet. Which also means that
-            // we cannot rebuild anything before this happens.
-            topLeftCell.rx() = kEdgeIndexNotSet;
-            topLeftCell.ry() = kEdgeIndexNotSet;
+            topLeftCell.rx() = 0;
+            topLeftCell.ry() = 0;
             return;
         }
 
@@ -1926,12 +1969,12 @@ void QQuickTableViewPrivate::layoutAfterLoadingInitialTable()
     relayoutTableItems();
     syncLoadedTableRectFromLoadedTable();
 
-    if (rebuildOptions.testFlag(RebuildOption::CalculateNewContentWidth)) {
+    if (rebuildOptions.testFlag(RebuildOption::CalculateNewContentWidth) || allColumnsLoaded()) {
         updateAverageColumnWidth();
         updateContentWidth();
     }
 
-    if (rebuildOptions.testFlag(RebuildOption::CalculateNewContentHeight)) {
+    if (rebuildOptions.testFlag(RebuildOption::CalculateNewContentHeight) || allRowsLoaded()) {
         updateAverageRowHeight();
         updateContentHeight();
     }

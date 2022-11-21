@@ -121,7 +121,9 @@ private slots:
     void checkForceLayoutFunction();
     void checkForceLayoutEndUpDoingALayout();
     void checkForceLayoutDuringModelChange();
+    void checkForceLayoutWhenAllItemsAreHidden();
     void checkContentWidthAndHeight();
+    void checkContentWidthAndHeightForSmallTables();
     void checkPageFlicking();
     void checkExplicitContentWidthAndHeight();
     void checkExtents_origin();
@@ -167,6 +169,8 @@ private slots:
     void checkTableviewInsideAsyncLoader();
     void hideRowsAndColumns_data();
     void hideRowsAndColumns();
+    void hideAndShowFirstColumn();
+    void hideAndShowFirstRow();
     void checkThatRevisionedPropertiesCannotBeUsedInOldImports();
     void checkSyncView_rootView_data();
     void checkSyncView_rootView();
@@ -176,6 +180,7 @@ private slots:
     void checkSyncView_connect_late_data();
     void checkSyncView_connect_late();
     void checkSyncView_pageFlicking();
+    void checkSyncView_emptyModel();
     void delegateWithRequiredProperties();
     void checkThatFetchMoreIsCalledWhenScrolledToTheEndOfTable();
     void replaceModel();
@@ -624,6 +629,38 @@ void tst_QQuickTableView::checkForceLayoutDuringModelChange()
     QCOMPARE(tableView->rows(), initialRowCount + 1);
 }
 
+void tst_QQuickTableView::checkForceLayoutWhenAllItemsAreHidden()
+{
+    // Check that you can have a TableView where all columns are
+    // initially hidden, and then show some columns and call
+    // forceLayout(). This should make the columns become visible.
+    LOAD_TABLEVIEW("forcelayout.qml");
+
+    // Tell all columns to be hidden
+    const char *propertyName = "columnWidths";
+    view->rootObject()->setProperty(propertyName, 0);
+
+    const int rows = 3;
+    const int columns = 3;
+    auto model = TestModelAsVariant(rows, columns);
+    tableView->setModel(model);
+
+    WAIT_UNTIL_POLISHED;
+
+    // Check that the we have no items loaded
+    QCOMPARE(tableViewPrivate->loadedColumns.count(), 0);
+    QCOMPARE(tableViewPrivate->loadedRows.count(), 0);
+    QCOMPARE(tableViewPrivate->loadedItems.count(), 0);
+
+    // Tell all columns to be visible
+    view->rootObject()->setProperty(propertyName, 10);
+    tableView->forceLayout();
+
+    QCOMPARE(tableViewPrivate->loadedRows.count(), rows);
+    QCOMPARE(tableViewPrivate->loadedColumns.count(), columns);
+    QCOMPARE(tableViewPrivate->loadedItems.count(), rows * columns);
+}
+
 void tst_QQuickTableView::checkContentWidthAndHeight()
 {
     // Check that contentWidth/Height reports the correct size of the
@@ -670,6 +707,30 @@ void tst_QQuickTableView::checkContentWidthAndHeight()
     // We should still have the same content width/height as when we started
     QCOMPARE(tableView->contentWidth(), expectedSizeInit);
     QCOMPARE(tableView->contentHeight(), expectedSizeInit);
+}
+
+void tst_QQuickTableView::checkContentWidthAndHeightForSmallTables()
+{
+    // For tables where all the columns in the model are loaded, we know
+    // the exact table width, and can therefore update the content width
+    // if e.g new rows are added or removed. The same is true for rows.
+    // This test will check that we do so.
+    LOAD_TABLEVIEW("sizefromdelegate.qml");
+
+    TestModel model(3, 3);
+    tableView->setModel(QVariant::fromValue(&model));
+    WAIT_UNTIL_POLISHED;
+
+    const qreal initialContentWidth = tableView->contentWidth();
+    const qreal initialContentHeight = tableView->contentHeight();
+    const QString longText = QStringLiteral("Adding a row with a very long text");
+    model.insertRow(0);
+    model.setModelData(QPoint(0, 0), QSize(1, 1), longText);
+
+    WAIT_UNTIL_POLISHED;
+
+    QVERIFY(tableView->contentWidth() > initialContentWidth);
+    QVERIFY(tableView->contentHeight() > initialContentHeight);
 }
 
 void tst_QQuickTableView::checkPageFlicking()
@@ -2354,6 +2415,82 @@ void tst_QQuickTableView::hideRowsAndColumns()
         QVERIFY(!columnsToHideList.contains(column));
 }
 
+void tst_QQuickTableView::hideAndShowFirstColumn()
+{
+    // Check that if we hide the first column, it will move
+    // the second column to the origin of the viewport. Then check
+    // that if we show the first column again, it will reappear at
+    // the origin of the viewport, and as such, pushing the second
+    // column to the right of it.
+    LOAD_TABLEVIEW("hiderowsandcolumns.qml");
+
+    const int modelSize = 5;
+    auto model = TestModelAsVariant(modelSize, modelSize);
+    tableView->setModel(model);
+
+    // Start by making the first column hidden
+    const auto columnsToHideList = QList<int>() << 0;
+    view->rootObject()->setProperty("columnsToHide", QVariant::fromValue(columnsToHideList));
+
+    WAIT_UNTIL_POLISHED;
+
+    const int expectedColumnCount = modelSize - columnsToHideList.count();
+    QCOMPARE(tableViewPrivate->loadedColumns.count(), expectedColumnCount);
+    QCOMPARE(tableViewPrivate->leftColumn(), 1);
+    QCOMPARE(tableView->contentX(), 0);
+    QCOMPARE(tableViewPrivate->loadedTableOuterRect.x(), 0);
+
+    // Make the first column in the model visible again
+    const auto emptyList = QList<int>();
+    view->rootObject()->setProperty("columnsToHide", QVariant::fromValue(emptyList));
+    tableView->forceLayout();
+
+    WAIT_UNTIL_POLISHED;
+
+    QCOMPARE(tableViewPrivate->loadedColumns.count(), modelSize);
+    QCOMPARE(tableViewPrivate->leftColumn(), 0);
+    QCOMPARE(tableView->contentX(), 0);
+    QCOMPARE(tableViewPrivate->loadedTableOuterRect.x(), 0);
+}
+
+void tst_QQuickTableView::hideAndShowFirstRow()
+{
+    // Check that if we hide the first row, it will move
+    // the second row to the origin of the viewport. Then check
+    // that if we show the first row again, it will reappear at
+    // the origin of the viewport, and as such, pushing the second
+    // row below it.
+    LOAD_TABLEVIEW("hiderowsandcolumns.qml");
+
+    const int modelSize = 5;
+    auto model = TestModelAsVariant(modelSize, modelSize);
+    tableView->setModel(model);
+
+    // Start by making the first row hidden
+    const auto rowsToHideList = QList<int>() << 0;
+    view->rootObject()->setProperty("rowsToHide", QVariant::fromValue(rowsToHideList));
+
+    WAIT_UNTIL_POLISHED;
+
+    const int expectedRowsCount = modelSize - rowsToHideList.count();
+    QCOMPARE(tableViewPrivate->loadedRows.count(), expectedRowsCount);
+    QCOMPARE(tableViewPrivate->topRow(), 1);
+    QCOMPARE(tableView->contentY(), 0);
+    QCOMPARE(tableViewPrivate->loadedTableOuterRect.y(), 0);
+
+    // Make the first row in the model visible again
+    const auto emptyList = QList<int>();
+    view->rootObject()->setProperty("rowsToHide", QVariant::fromValue(emptyList));
+    tableView->forceLayout();
+
+    WAIT_UNTIL_POLISHED;
+
+    QCOMPARE(tableViewPrivate->loadedRows.count(), modelSize);
+    QCOMPARE(tableViewPrivate->topRow(), 0);
+    QCOMPARE(tableView->contentY(), 0);
+    QCOMPARE(tableViewPrivate->loadedTableOuterRect.y(), 0);
+}
+
 void tst_QQuickTableView::checkThatRevisionedPropertiesCannotBeUsedInOldImports()
 {
     // Check that if you use a QQmlAdaptorModel together with a Repeater, the
@@ -2729,6 +2866,48 @@ void tst_QQuickTableView::checkSyncView_pageFlicking()
     QVERIFY(tableViewPrivate->scheduledRebuildOptions & QQuickTableViewPrivate::RebuildOption::ViewportOnly);
     QVERIFY(!(tableViewPrivate->scheduledRebuildOptions & QQuickTableViewPrivate::RebuildOption::CalculateNewTopLeftColumn));
     QVERIFY(tableViewPrivate->scheduledRebuildOptions & QQuickTableViewPrivate::RebuildOption::CalculateNewTopLeftRow);
+}
+
+void tst_QQuickTableView::checkSyncView_emptyModel()
+{
+    // When a tableview has a syncview with an empty model then it should still be
+    // showing the tableview without depending on the syncview. This is particularly
+    // important for headerviews for example
+    LOAD_TABLEVIEW("syncviewsimple.qml");
+    GET_QML_TABLEVIEW(tableViewH);
+    GET_QML_TABLEVIEW(tableViewV);
+    GET_QML_TABLEVIEW(tableViewHV);
+    QQuickTableView *views[] = {tableViewH, tableViewV, tableViewHV};
+
+    auto model = TestModelAsVariant(100, 100);
+
+    for (auto view : views)
+        view->setModel(model);
+
+    WAIT_UNTIL_POLISHED_ARG(tableViewHV);
+
+    // Check that geometry properties are mirrored
+    QCOMPARE(tableViewH->columnSpacing(), tableView->columnSpacing());
+    QCOMPARE(tableViewH->rowSpacing(), 0);
+    QCOMPARE(tableViewH->contentWidth(), tableView->contentWidth());
+    QVERIFY(tableViewH->contentHeight() > 0);
+    QCOMPARE(tableViewV->columnSpacing(), 0);
+    QCOMPARE(tableViewV->rowSpacing(), tableView->rowSpacing());
+    QCOMPARE(tableViewV->contentHeight(), tableView->contentHeight());
+    QVERIFY(tableViewV->contentWidth() > 0);
+
+    QCOMPARE(tableViewH->contentX(), tableView->contentX());
+    QCOMPARE(tableViewH->contentY(), 0);
+    QCOMPARE(tableViewV->contentX(), 0);
+    QCOMPARE(tableViewV->contentY(), tableView->contentY());
+    QCOMPARE(tableViewHV->contentX(), tableView->contentX());
+    QCOMPARE(tableViewHV->contentY(), tableView->contentY());
+
+    QCOMPARE(tableViewHPrivate->loadedTableOuterRect.left(), tableViewPrivate->loadedTableOuterRect.left());
+    QCOMPARE(tableViewHPrivate->loadedTableOuterRect.top(), 0);
+
+    QCOMPARE(tableViewVPrivate->loadedTableOuterRect.top(), tableViewPrivate->loadedTableOuterRect.top());
+    QCOMPARE(tableViewVPrivate->loadedTableOuterRect.left(), 0);
 }
 
 void tst_QQuickTableView::checkThatFetchMoreIsCalledWhenScrolledToTheEndOfTable()

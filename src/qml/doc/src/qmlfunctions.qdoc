@@ -159,11 +159,11 @@
   \relates QQmlEngine
 
   Declares the enclosing type to be a singleton in QML. This only takes effect
-  if the type is available in QML, by having a \l QML_ELEMENT or
-  \l QML_NAMED_ELEMENT() macro. By default, each QQmlEngine will try to create a
-  singleton instance using the type's default constructor when the type is first
-  accessed. If there is no default constructor the singleton is initially
-  inaccessible. This behavior can be overridden by calling
+  if the type is a \l Q_OBJECT and is available in QML (by having a
+  \l QML_ELEMENT or \l QML_NAMED_ELEMENT() macro). By default, each QQmlEngine
+  will try to create a singleton instance using the type's default constructor
+  when the type is first accessed. If there is no default constructor the
+  singleton is initially inaccessible. This behavior can be overridden by calling
   \l qmlRegisterSingletonType() with a specific factory function or
   \l qmlRegisterSingletonInstance() with a specific instance for the same class
   and the same type namespace and version.
@@ -249,6 +249,10 @@
 
   This is useful for registering types that cannot be amended to add the macros,
   for example because they belong to 3rdparty libraries.
+
+  \b{NOTE:} You may want to use \l QML_NAMED_ELEMENT() instead of \l QML_ELEMENT due to the fact that
+  the element will be named like the struct it is contained in, not the foreign type.
+  See \l {Extending QML - Extension Objects Example} for an example.
 
   \sa QML_ELEMENT, QML_NAMED_ELEMENT()
 */

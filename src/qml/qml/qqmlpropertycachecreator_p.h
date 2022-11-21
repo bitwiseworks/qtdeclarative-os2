@@ -104,6 +104,8 @@ public:
     static int metaTypeForPropertyType(QV4::CompiledData::BuiltinType type);
 
     static QByteArray createClassNameTypeByUrl(const QUrl &url);
+
+    static QByteArray createClassNameForInlineComponent(const QUrl &baseUrl, int icId);
 };
 
 template <typename ObjectContainer>
@@ -863,6 +865,10 @@ inline QQmlError QQmlPropertyCacheAliasCreator<ObjectContainer>::propertyDataFor
             Q_ASSERT(targetCache);
             targetProperty = targetCache->property(valueTypeIndex);
 
+            if (targetProperty == nullptr) {
+                return qQmlCompileError(alias.referenceLocation,
+                                        QQmlPropertyCacheCreatorBase::tr("Invalid alias target"));
+            }
 
             *type = targetProperty->propType();
             writable = targetProperty->isWritable();

@@ -822,6 +822,7 @@ void QQuickTextEditPrivate::setTopPadding(qreal value, bool reset)
     }
     if ((!reset && !qFuzzyCompare(oldPadding, value)) || (reset && !qFuzzyCompare(oldPadding, padding()))) {
         q->updateSize();
+        q->updateWholeDocument();
         emit q->topPaddingChanged();
     }
 }
@@ -836,6 +837,7 @@ void QQuickTextEditPrivate::setLeftPadding(qreal value, bool reset)
     }
     if ((!reset && !qFuzzyCompare(oldPadding, value)) || (reset && !qFuzzyCompare(oldPadding, padding()))) {
         q->updateSize();
+        q->updateWholeDocument();
         emit q->leftPaddingChanged();
     }
 }
@@ -850,6 +852,7 @@ void QQuickTextEditPrivate::setRightPadding(qreal value, bool reset)
     }
     if ((!reset && !qFuzzyCompare(oldPadding, value)) || (reset && !qFuzzyCompare(oldPadding, padding()))) {
         q->updateSize();
+        q->updateWholeDocument();
         emit q->rightPaddingChanged();
     }
 }
@@ -864,6 +867,7 @@ void QQuickTextEditPrivate::setBottomPadding(qreal value, bool reset)
     }
     if ((!reset && !qFuzzyCompare(oldPadding, value)) || (reset && !qFuzzyCompare(oldPadding, padding()))) {
         q->updateSize();
+        q->updateWholeDocument();
         emit q->bottomPaddingChanged();
     }
 }
@@ -2355,6 +2359,14 @@ void QQuickTextEdit::q_textChanged()
     d->determineHorizontalAlignment();
     d->updateDefaultTextOption();
     updateSize();
+
+    markDirtyNodesForRange(0, d->document->characterCount(), 0);
+    polish();
+    if (isComponentComplete()) {
+        d->updateType = QQuickTextEditPrivate::UpdatePaintNode;
+        update();
+    }
+
     emit textChanged();
 }
 
