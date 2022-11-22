@@ -48,6 +48,7 @@
 #include <private/qqmlscriptstring_p.h>
 #include <private/qqmlvmemetaobject_p.h>
 #include <private/qqmlcomponent_p.h>
+#include <private/qqmltype_p_p.h>
 
 #include "testtypes.h"
 #include "testhttpserver.h"
@@ -145,6 +146,7 @@ private slots:
     void aliasProperties();
     void aliasPropertiesAndSignals();
     void aliasPropertyChangeSignals();
+    void qtbug_89822();
     void componentCompositeType();
     void i18n();
     void i18n_data();
@@ -331,6 +333,9 @@ private slots:
     void arrayToContainer();
     void qualifiedScopeInCustomParser();
     void accessNullPointerPropertyCache();
+    void bareInlineComponent();
+
+    void hangOnWarning();
 
 private:
     QQmlEngine engine;
@@ -2226,6 +2231,12 @@ void tst_qqmllanguage::aliasPropertiesAndSignals()
     QScopedPointer<QObject> o(component.create());
     QVERIFY(o);
     QCOMPARE(o->property("test").toBool(), true);
+}
+
+void tst_qqmllanguage::qtbug_89822()
+{
+    QQmlComponent component(&engine, testFileUrl("qtbug_89822.qml"));
+    VERIFY_ERRORS("qtbug_89822.errors.txt");
 }
 
 // Test that the root element in a composite type can be a Component
@@ -5604,6 +5615,7 @@ void tst_qqmllanguage::inlineComponent_data()
     QTest::newRow("Alias resolves correctly") << testFileUrl("inlineComponentWithAlias.qml") << QColorConstants::Svg::lime << 42 << true;
 
     QTest::newRow("Two inline components in same do not crash (QTBUG-86989)") << testFileUrl("twoInlineComponents.qml") << QColor() << 0 << false;
+    QTest::newRow("Inline components used in same file (QTBUG-89173)") << testFileUrl("inlineComponentsSameFile.qml") << QColor() << 0 << false;
 }
 
 void tst_qqmllanguage::inlineComponentReferenceCycle_data()
@@ -5810,6 +5822,42 @@ void tst_qqmllanguage::accessNullPointerPropertyCache()
     QVERIFY(c.isReady());
     QScopedPointer<QObject> obj(c.create());
     QVERIFY(!obj.isNull());
+}
+
+void tst_qqmllanguage::bareInlineComponent()
+{
+    QQmlEngine engine;
+
+    QQmlComponent c(&engine, testFileUrl("bareInline.qml"));
+    QVERIFY2(c.isReady(), qPrintable(c.errorString()));
+    QScopedPointer<QObject> o(c.create());
+    QVERIFY(!o.isNull());
+
+    QQmlMetaType::freeUnusedTypesAndCaches();
+
+    bool tab1Found = false;
+    const auto types = QQmlMetaType::qmlTypes();
+    for (const QQmlType &type : types) {
+        if (type.elementName() == QStringLiteral("Tab1")) {
+            QVERIFY(type.module().isEmpty());
+            tab1Found = true;
+            const auto ics = type.priv()->objectIdToICType;
+            QVERIFY(ics.size() > 0);
+            for (const QQmlType &ic : ics)
+                QVERIFY(ic.containingType() == type);
+        }
+    }
+    QVERIFY(tab1Found);
+}
+
+void tst_qqmllanguage::hangOnWarning()
+{
+    QTest::ignoreMessage(QtWarningMsg,
+                         qPrintable(QStringLiteral("%1:3 : Ignored annotation")
+                                            .arg(testFileUrl("hangOnWarning.qml").toString())));
+    QQmlComponent component(&engine, testFileUrl("hangOnWarning.qml"));
+    QScopedPointer<QObject> object(component.create());
+    QVERIFY(object != nullptr);
 }
 
 QTEST_MAIN(tst_qqmllanguage)

@@ -29,6 +29,8 @@
 #include <QtTest/qtest.h>
 #include <QtQml/qqmlcomponent.h>
 #include <QtQmlModels/private/qqmldelegatemodel_p.h>
+#include <QtQuick/qquickview.h>
+#include <QtQuick/qquickitem.h>
 
 #include "../../shared/util.h"
 
@@ -42,6 +44,9 @@ public:
 private slots:
     void valueWithoutCallingObjectFirst_data();
     void valueWithoutCallingObjectFirst();
+    void filterOnGroup_removeWhenCompleted();
+    void qtbug_86017();
+    void contextAccessedByHandler();
 };
 
 class AbstractItemModel : public QAbstractItemModel
@@ -132,6 +137,53 @@ void tst_QQmlDelegateModel::valueWithoutCallingObjectFirst()
     QQmlDelegateModel *model = qobject_cast<QQmlDelegateModel*>(root.data());
     QVERIFY(model);
     QCOMPARE(model->variantValue(index, role), expectedValue);
+}
+
+void tst_QQmlDelegateModel::filterOnGroup_removeWhenCompleted()
+{
+    QQuickView view(testFileUrl("removeFromGroup.qml"));
+    QCOMPARE(view.status(), QQuickView::Ready);
+    view.show();
+    QQuickItem *root = view.rootObject();
+    QVERIFY(root);
+    QQmlDelegateModel *model = root->findChild<QQmlDelegateModel*>();
+    QVERIFY(model);
+    QTest::qWaitFor([=]{ return model->count() == 2; } );
+
+void tst_QQmlDelegateModel::qtbug_86017()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.loadUrl(testFileUrl("qtbug_86017.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QTRY_VERIFY(component.isReady());
+    QQmlDelegateModel *model = qobject_cast<QQmlDelegateModel*>(root.data());
+
+    QVERIFY(model);
+    QCOMPARE(model->count(), 2);
+    QCOMPARE(model->filterGroup(), "selected");
+}
+
+void tst_QQmlDelegateModel::filterOnGroup_removeWhenCompleted()
+{
+    QQuickView view(testFileUrl("removeFromGroup.qml"));
+    QCOMPARE(view.status(), QQuickView::Ready);
+    view.show();
+    QQuickItem *root = view.rootObject();
+    QVERIFY(root);
+    QQmlDelegateModel *model = root->findChild<QQmlDelegateModel*>();
+    QVERIFY(model);
+    QVERIFY(QTest::qWaitFor([=]{ return model->count() == 2; }));
+}
+
+void tst_QQmlDelegateModel::contextAccessedByHandler()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("contextAccessedByHandler.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->property("works").toBool());
 }
 
 QTEST_MAIN(tst_QQmlDelegateModel)

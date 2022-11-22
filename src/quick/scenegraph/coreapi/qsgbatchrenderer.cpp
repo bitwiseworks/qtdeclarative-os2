@@ -1878,7 +1878,7 @@ bool Renderer::checkOverlap(int first, int last, const Rect &bounds)
 {
     for (int i=first; i<=last; ++i) {
         Element *e = m_alphaRenderList.at(i);
-        if (!e || e->batch)
+        if (!e)
             continue;
         Q_ASSERT(e->boundsComputed);
         if (e->bounds.intersects(bounds))
@@ -1949,8 +1949,10 @@ void Renderer::prepareAlphaBatches()
                 continue;
             if (ej->root != ei->root || ej->isRenderNode)
                 break;
-            if (ej->batch)
+            if (ej->batch) {
+                overlapBounds |= ej->bounds;
                 continue;
+            }
 
             QSGGeometryNode *gnj = ej->node;
             if (gnj->geometry()->vertexCount() == 0)
@@ -1958,7 +1960,11 @@ void Renderer::prepareAlphaBatches()
 
             if (gni->clipList() == gnj->clipList()
                     && gni->geometry()->drawingMode() == gnj->geometry()->drawingMode()
-                    && (gni->geometry()->drawingMode() != QSGGeometry::DrawLines || gni->geometry()->lineWidth() == gnj->geometry()->lineWidth())
+                    && (gni->geometry()->drawingMode() != QSGGeometry::DrawLines
+                        || (gni->geometry()->lineWidth() == gnj->geometry()->lineWidth()
+                            // Must not do overlap checks when the line width is not 1,
+                            // we have no knowledge how such lines are rasterized.
+                            && gni->geometry()->lineWidth() == 1.0f))
                     && gni->geometry()->attributes() == gnj->geometry()->attributes()
                     && gni->inheritedOpacity() == gnj->inheritedOpacity()
                     && gni->activeMaterial()->type() == gnj->activeMaterial()->type()
@@ -2432,18 +2438,20 @@ ClipState::ClipType Renderer::updateStencilClip(const QSGClipNode *clip)
         // TODO: Check for multisampling and pixel grid alignment.
         bool isRectangleWithNoPerspective = clip->isRectangular()
                 && qFuzzyIsNull(m(3, 0)) && qFuzzyIsNull(m(3, 1));
-        auto noRotate = [] (const QMatrix4x4 &m) { return qFuzzyIsNull(m(0, 1)) && qFuzzyIsNull(m(1, 0)); };
-        auto isRotate90 = [] (const QMatrix4x4 &m) { return qFuzzyIsNull(m(0, 0)) && qFuzzyIsNull(m(1, 1)); };
-        auto scissorRect = [&] (const QRectF &bbox, const QMatrix4x4 &m) {
+        bool noRotate = qFuzzyIsNull(m(0, 1)) && qFuzzyIsNull(m(1, 0));
+        bool isRotate90 = qFuzzyIsNull(m(0, 0)) && qFuzzyIsNull(m(1, 1));
+
+        if (isRectangleWithNoPerspective && (noRotate || isRotate90)) {
+            QRectF bbox = clip->clipRect();
             qreal invW = 1 / m(3, 3);
             qreal fx1, fy1, fx2, fy2;
-            if (noRotate(m)) {
+            if (noRotate) {
                 fx1 = (bbox.left() * m(0, 0) + m(0, 3)) * invW;
                 fy1 = (bbox.bottom() * m(1, 1) + m(1, 3)) * invW;
                 fx2 = (bbox.right() * m(0, 0) + m(0, 3)) * invW;
                 fy2 = (bbox.top() * m(1, 1) + m(1, 3)) * invW;
             } else {
-                Q_ASSERT(isRotate90(m));
+                Q_ASSERT(isRotate90);
                 fx1 = (bbox.bottom() * m(0, 1) + m(0, 3)) * invW;
                 fy1 = (bbox.left() * m(1, 0) + m(1, 3)) * invW;
                 fx2 = (bbox.top() * m(0, 1) + m(0, 3)) * invW;
@@ -2462,18 +2470,12 @@ ClipState::ClipType Renderer::updateStencilClip(const QSGClipNode *clip)
             GLint ix2 = qRound((fx2 + 1) * deviceRect.width() * qreal(0.5));
             GLint iy2 = qRound((fy2 + 1) * deviceRect.height() * qreal(0.5));
 
-            return QRect(ix1, iy1, ix2 - ix1, iy2 - iy1);
-        };
-
-        if (isRectangleWithNoPerspective && (noRotate(m) || isRotate90(m))) {
-            auto rect = scissorRect(clip->clipRect(), m);
-
             if (!(clipType & ClipState::ScissorClip)) {
-                m_currentScissorRect = rect;
+                m_currentScissorRect = QRect(ix1, iy1, ix2 - ix1, iy2 - iy1);
                 glEnable(GL_SCISSOR_TEST);
                 clipType |= ClipState::ScissorClip;
             } else {
-                m_currentScissorRect &= rect;
+                m_currentScissorRect &= QRect(ix1, iy1, ix2 - ix1, iy2 - iy1);
             }
             glScissor(m_currentScissorRect.x(), m_currentScissorRect.y(),
                       m_currentScissorRect.width(), m_currentScissorRect.height());
@@ -2488,31 +2490,9 @@ ClipState::ClipType Renderer::updateStencilClip(const QSGClipNode *clip)
                     m_clipProgram.link();
                     m_clipMatrixId = m_clipProgram.uniformLocation("matrix");
                 }
-                const QSGClipNode *clipNext = clip->clipList();
-                if (clipNext) {
-                    QMatrix4x4 mNext = m_current_projection_matrix;
-                    if (clipNext->matrix())
-                        mNext *= *clipNext->matrix();
-
-                    auto rect = scissorRect(clipNext->clipRect(), mNext);
-
-                    ClipState::ClipType clipTypeNext = clipType ;
-                    clipTypeNext |= ClipState::StencilClip;
-                    QRect m_next_scissor_rect = m_currentScissorRect;
-                    if (!(clipTypeNext & ClipState::ScissorClip)) {
-                        m_next_scissor_rect = rect;
-                        glEnable(GL_SCISSOR_TEST);
-                    } else {
-                        m_next_scissor_rect =
-                           m_currentScissorRect & rect;
-                    }
-                    glScissor(m_next_scissor_rect.x(), m_next_scissor_rect.y(),
-                              m_next_scissor_rect.width(), m_next_scissor_rect.height());
-                }
 
                 glClearStencil(0);
                 glClear(GL_STENCIL_BUFFER_BIT);
-                glDisable(GL_SCISSOR_TEST);
                 glEnable(GL_STENCIL_TEST);
                 glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
                 glDepthMask(GL_FALSE);
@@ -4062,12 +4042,14 @@ void Renderer::renderBatches()
         if (Q_LIKELY(renderAlpha)) {
             for (int i=0; i<m_alphaBatches.size(); ++i) {
                 Batch *b = m_alphaBatches.at(i);
-                if (b->merged)
+                if (b->merged) {
                     renderMergedBatch(b);
-                else if (b->isRenderNode)
+                } else if (b->isRenderNode) {
+                    m_current_projection_matrix = projectionMatrix();
                     renderRenderNode(b);
-                else
+                } else {
                     renderUnmergedBatch(b);
+                }
             }
         }
 
@@ -4470,6 +4452,9 @@ void Renderer::renderRenderNode(Batch *batch) // legacy (GL-only)
         opacity = opacity->parent();
     }
 
+    // having DepthAwareRendering leaves depth test on in the alpha pass
+    const bool depthTestWasEnabled = m_useDepthBuffer;
+
     glDisable(GL_STENCIL_TEST);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -4504,7 +4489,9 @@ void Renderer::renderRenderNode(Batch *batch) // legacy (GL-only)
         m_currentClipType = ClipState::NoClip;
     }
 
-    if (changes & QSGRenderNode::DepthState)
+    if (depthTestWasEnabled)
+        glEnable(GL_DEPTH_TEST);
+    else if (changes & QSGRenderNode::DepthState)
         glDisable(GL_DEPTH_TEST);
 
     if (changes & QSGRenderNode::ColorState)

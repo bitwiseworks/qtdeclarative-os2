@@ -1,9 +1,9 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
-** This file is part of the QtQuick module of the Qt Toolkit.
+** This file is part of the QtQuick module of the Qt Toolkit.fset
 **
 ** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
@@ -905,7 +905,7 @@ bool QQuickKeysAttached::isConnected(const char *signalName) const
 */
 
 /*!
-    \qmlproperty list<Object> QtQuick::Keys::forwardTo
+    \qmlproperty list<Item> QtQuick::Keys::forwardTo
 
     This property provides a way to forward key presses, key releases, and keyboard input
     coming from input methods to other items. This can be useful when you want
@@ -1883,7 +1883,23 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
     \endqml
 
 
-    \section2 Key Handling
+    \section2 Event Handling
+
+    All Item-based visual types can use \l {Qt Quick Input Handlers}{Input Handlers}
+    to handle incoming input events (subclasses of QInputEvent), such as mouse,
+    touch and key events. This is the preferred declarative way to handle events.
+
+    An alternative way to handle touch events is to subclass QQuickItem, call
+    setAcceptTouchEvents() in the constructor, and override touchEvent().
+    \l {QEvent::setAccepted()}{Accept} the entire event to stop delivery to
+    items underneath, and to exclusively grab all the event's touch points.
+
+    Likewise, a QQuickItem subclass can call setAcceptedMouseButtons()
+    to register to receive mouse button events, setAcceptHoverEvents()
+    to receive hover events (mouse movements while no button is pressed),
+    and override the virtual functions mousePressEvent(), mouseMoveEvent(), and
+    mouseReleaseEvent(). Those can also accept the event to prevent further
+    delivery and get an implicit grab at the same time.
 
     Key handling is available to all Item-based visual types via the \l Keys
     attached property.  The \e Keys attached property provides basic signals
@@ -2079,7 +2095,7 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
 /*!
     \class QQuickItem::ItemChangeData
     \inmodule QtQuick
-    \brief Adds supplimentary information to the QQuickItem::itemChange()
+    \brief Adds supplementary information to the QQuickItem::itemChange()
     function.
 
     The meaning of each member of this class is defined by the change type.
@@ -2109,25 +2125,31 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
 
 /*!
     \variable QQuickItem::ItemChangeData::realValue
-    Contains supplimentary information to the QQuickItem::itemChange() function.
+    The numeric value that has changed: \l {QQuickItem::opacity()}{opacity},
+    \l {QQuickItem::rotation()}{rotation} or
+    \l {QScreen::devicePixelRatio}{device pixel ratio}.
     \sa QQuickItem::ItemChange
  */
 
 /*!
     \variable QQuickItem::ItemChangeData::boolValue
-    Contains supplimentary information to the QQuickItem::itemChange() function.
+    The boolean value that has changed: \l {QQuickItem::visible()}{visible},
+    \l {QQuickItem::enabled()}{enabled}, \l {QQuickItem::activeFocus()}{activeFocus}
+    or \l {QQuickItem::antialiasing()}{antialiasing}.
     \sa QQuickItem::ItemChange
  */
 
 /*!
     \variable QQuickItem::ItemChangeData::item
-    Contains supplimentary information to the QQuickItem::itemChange() function.
+    The item that has been added or removed as a \l{QQuickItem::childItems()}{child},
+    or the new \l{QQuickItem::parentItem()}{parent}.
     \sa QQuickItem::ItemChange
  */
 
 /*!
     \variable QQuickItem::ItemChangeData::window
-    Contains supplimentary information to the QQuickItem::itemChange() function.
+    The \l{QQuickWindow}{window} in which the item has been shown, or \c nullptr
+    if the item has been removed from a window.
     \sa QQuickItem::ItemChange
  */
 
@@ -3055,8 +3077,9 @@ Returns a transform that maps points from item space into window space.
 */
 QTransform QQuickItemPrivate::itemToWindowTransform() const
 {
-    // XXX todo
-    QTransform rv = parentItem?QQuickItemPrivate::get(parentItem)->itemToWindowTransform():QTransform();
+    // item's parent must not be itself, otherwise calling itemToWindowTransform() on it is infinite recursion
+    Q_ASSERT(!parentItem || QQuickItemPrivate::get(parentItem) != this);
+    QTransform rv = parentItem ? QQuickItemPrivate::get(parentItem)->itemToWindowTransform() : QTransform();
     itemToParentTransform(rv);
     return rv;
 }
@@ -3650,6 +3673,10 @@ QQmlListProperty<QObject> QQuickItemPrivate::data()
 
     This property is useful if you need to access the collective geometry
     of an item's children in order to correctly size the item.
+
+    The geometry that is returned is local to the item. For example:
+
+    \snippet qml/item/childrenRect.qml local
 */
 /*!
     \property QQuickItem::childrenRect
@@ -3659,6 +3686,10 @@ QQmlListProperty<QObject> QQuickItemPrivate::data()
 
     This property is useful if you need to access the collective geometry
     of an item's children in order to correctly size the item.
+
+    The geometry that is returned is local to the item. For example:
+
+    \snippet qml/item/childrenRect.qml local
 */
 QRectF QQuickItem::childrenRect()
 {
@@ -3686,6 +3717,9 @@ QList<QQuickItem *> QQuickItem::childItems() const
 
   If clipping is enabled, an item will clip its own painting, as well
   as the painting of its children, to its bounding rectangle.
+
+  \note Clipping can affect rendering performance. See \l {Clipping} for more
+  information.
 */
 /*!
   \property QQuickItem::clip
@@ -3753,6 +3787,14 @@ void QQuickItem::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeo
         emit widthChanged();
     if (change.heightChange())
         emit heightChanged();
+#if QT_CONFIG(accessibility)
+    if (QAccessible::isActive()) {
+        if (QObject *acc = QQuickAccessibleAttached::findAccessible(this)) {
+            QAccessibleEvent ev(acc, QAccessible::LocationChanged);
+            QAccessible::updateAccessibility(&ev);
+        }
+    }
+#endif
 }
 
 /*!
@@ -4751,14 +4793,24 @@ void QQuickItem::forceActiveFocus()
 
 void QQuickItem::forceActiveFocus(Qt::FocusReason reason)
 {
+    Q_D(QQuickItem);
     setFocus(true, reason);
     QQuickItem *parent = parentItem();
+    QQuickItem *scope = nullptr;
     while (parent) {
         if (parent->flags() & QQuickItem::ItemIsFocusScope) {
             parent->setFocus(true, reason);
+            if (!scope)
+                scope = parent;
         }
         parent = parent->parentItem();
     }
+    // In certain reparenting scenarios, d->focus might be true and the scope
+    // might also have focus, so that setFocus() returns early without actually
+    // acquiring active focus, because it thinks it already has it. In that
+    // case, try to set the DeliveryAgent's active focus. (QTBUG-89736).
+    if (scope && !d->activeFocus && d->window)
+        QQuickWindowPrivate::get(d->window)->setFocusInScope(scope, this, Qt::OtherFocusReason);
 }
 
 /*!
@@ -7293,7 +7345,9 @@ bool QQuickItem::isAncestorOf(const QQuickItem *child) const
     If an item does not accept the mouse button for a particular mouse event,
     the mouse event will not be delivered to the item and will be delivered
     to the next item in the item hierarchy instead.
-  */
+
+    \sa acceptTouchEvents()
+*/
 Qt::MouseButtons QQuickItem::acceptedMouseButtons() const
 {
     Q_D(const QQuickItem);
@@ -7302,7 +7356,13 @@ Qt::MouseButtons QQuickItem::acceptedMouseButtons() const
 
 /*!
     Sets the mouse buttons accepted by this item to \a buttons.
-  */
+
+    \note In Qt 5, calling setAcceptedMouseButtons() implicitly caused
+    an item to receive touch events as well as mouse events; but it was
+    recommended to call setAcceptTouchEvents() to subscribe for them.
+    In Qt 6, it is necessary to call setAcceptTouchEvents() to continue
+    to receive them.
+*/
 void QQuickItem::setAcceptedMouseButtons(Qt::MouseButtons buttons)
 {
     Q_D(QQuickItem);
@@ -7350,6 +7410,12 @@ bool QQuickItem::isUnderMouse() const
 {
     Q_D(const QQuickItem);
     if (!d->window)
+        return false;
+
+    // QQuickWindow handles QEvent::Leave to reset the lastMousePosition
+    // FIXME: Using QPointF() as the reset value means an item will not be
+    // under the mouse if the mouse is at 0,0 of the window.
+    if (QQuickWindowPrivate::get(d->window)->lastMousePosition == QPointF())
         return false;
 
     QPointF cursorPos = QGuiApplicationPrivate::lastCursorPosition;
@@ -7766,22 +7832,23 @@ void QQuickItem::setKeepTouchGrab(bool keep)
 }
 
 /*!
-  \qmlmethod bool QtQuick::Item::contains(point point)
+    \qmlmethod bool QtQuick::Item::contains(point point)
 
-  Returns true if this item contains \a point, which is in local coordinates;
-  returns false otherwise.
-  */
+    Returns \c true if this item contains \a point, which is in local coordinates;
+    returns \c false otherwise.  This is the same check that is used for
+    hit-testing a QEventPoint during event delivery, and is affected by
+    containmentMask() if it is set.
+*/
 /*!
-  Returns true if this item contains \a point, which is in local coordinates;
-  returns false otherwise.
+    Returns \c true if this item contains \a point, which is in local coordinates;
+    returns \c false otherwise.
 
-  This function can be overwritten in order to handle point collisions in items
-  with custom shapes. The default implementation checks if the point is inside
-  the item's bounding rect.
+    This function can be overridden in order to handle point collisions in items
+    with custom shapes. The default implementation checks whether the point is inside
+    containmentMask() if it is set, or inside the bounding box otherwise.
 
-  Note that this method is generally used to check whether the item is under the mouse cursor,
-  and for that reason, the implementation of this function should be as light-weight
-  as possible.
+    \note This method is used for hit-testing each QEventPoint during event
+    delivery, so the implementation should be kept as lightweight as possible.
 */
 bool QQuickItem::contains(const QPointF &point) const
 {
@@ -7804,22 +7871,48 @@ bool QQuickItem::contains(const QPointF &point) const
     \qmlproperty QObject* QtQuick::Item::containmentMask
     \since 5.11
     This property holds an optional mask for the Item to be used in the
-    QtQuick::Item::contains method.
-    QtQuick::Item::contains main use is currently to determine whether
-    an input event has landed into the item or not.
+    QtQuick::Item::contains() method. Its main use is currently to determine
+    whether a \l {QPointerEvent}{pointer event} has landed into the item or not.
 
     By default the \l contains method will return true for any point
-    within the Item's bounding box. \c containmentMask allows for a
-    more fine-grained control. For example, the developer could
-    define and use an AnotherItem element as containmentMask,
-    which has a specialized contains method, like:
+    within the Item's bounding box. \c containmentMask allows for
+    more fine-grained control. For example, if a custom C++
+    QQuickItem subclass with a specialized contains() method
+    is used as containmentMask:
 
     \code
     Item { id: item; containmentMask: AnotherItem { id: anotherItem } }
     \endcode
 
-    \e{item}'s contains method would then return true only if
-    \e{anotherItem}'s contains implementation returns true.
+    \e{item}'s contains method would then return \c true only if
+    \e{anotherItem}'s contains() implementation returns \c true.
+
+    A \l Shape can be used in this way, to make an item react to
+    \l {QPointerEvent}{pointer events} only within a non-rectangular region,
+    as illustrated in the \l {Qt Quick Examples - Shapes}{Shapes example}
+    (see \c tapableTriangle.qml).
+*/
+/*!
+    \property QQuickItem::containmentMask
+    \since 5.11
+    This property holds an optional mask to be used in the contains() method,
+    which is mainly used for hit-testing each \l QPointerEvent.
+
+    By default, \l contains() will return \c true for any point
+    within the Item's bounding box. But any QQuickItem, or any QObject
+    that implements a function of the form
+    \code
+    Q_INVOKABLE bool contains(const QPointF &point) const;
+    \endcode
+    can be used as a mask, to defer hit-testing to that object.
+
+    \note contains() is called frequently during event delivery.
+    Deferring hit-testing to another object slows it down somewhat.
+    containmentMask() can cause performance problems if that object's
+    contains() method is not efficient. If you implement a custom
+    QQuickItem subclass, you can alternatively override contains().
+
+    \sa contains()
 */
 QObject *QQuickItem::containmentMask() const
 {

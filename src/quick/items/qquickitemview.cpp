@@ -2346,7 +2346,9 @@ FxViewItem *QQuickItemViewPrivate::createItem(int modelIndex, QQmlIncubator::Inc
 
     inRequest = true;
 
-    QObject* object = model->object(modelIndex, incubationMode);
+    // The model will run this same range check internally but produce a warning and return nullptr.
+    // Since we handle this result graciously in our code, we preempt this warning by checking the range ourselves.
+    QObject* object = modelIndex < model->count() ? model->object(modelIndex, incubationMode) : nullptr;
     QQuickItem *item = qmlobject_cast<QQuickItem*>(object);
 
     if (!item) {
@@ -2400,6 +2402,8 @@ void QQuickItemView::createdItem(int index, QObject* object)
             d->repositionPackageItemAt(item, index);
         else if (index == d->currentIndex)
             d->updateCurrent(index);
+    } else if (index == d->currentIndex) {
+        d->updateCurrent(index);
     }
 }
 

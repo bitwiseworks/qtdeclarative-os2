@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtQml module of the Qt Toolkit.
@@ -968,6 +968,17 @@ void QQDMIncubationTask::initializeRequiredProperties(QQmlDelegateModelItem *mod
             contextData->extraObject = modelItemToIncubate;
         }
 
+        // If we have required properties, we clear the context object
+        // so that the model role names are not polluting the context
+        if (incubating) {
+            Q_ASSERT(incubating->contextData);
+            incubating->contextData->contextObject = nullptr;
+        }
+
+        if (proxyContext) {
+            proxyContext->contextObject = nullptr;
+        }
+
         if (incubatorPriv->requiredProperties().empty())
             return;
         RequiredProperties &requiredProperties = incubatorPriv->requiredProperties();
@@ -1279,6 +1290,7 @@ QObject *QQmlDelegateModelPrivate::object(Compositor::Group group, int index, QQ
 
         QQmlContextData *ctxt = new QQmlContextData;
         ctxt->setParent(QQmlContextData::get(creationContext  ? creationContext : m_context.data()));
+        ctxt->contextObject = cacheItem;
         cacheItem->contextData = ctxt;
 
         if (m_adaptorModel.hasProxyObject()) {
@@ -1289,6 +1301,7 @@ QObject *QQmlDelegateModelPrivate::object(Compositor::Group group, int index, QQ
                 QObject *proxied = proxy->proxiedObject();
                 cacheItem->incubationTask->proxiedObject = proxied;
                 cacheItem->incubationTask->proxyContext = ctxt;
+                ctxt->contextObject = cacheItem;
                 // We don't own the proxied object. We need to clear it if it goes away.
                 QObject::connect(proxied, &QObject::destroyed,
                                  cacheItem, &QQmlDelegateModelItem::childContextObjectDestroyed);
@@ -1343,6 +1356,8 @@ QObject *QQmlDelegateModel::object(int index, QQmlIncubator::IncubationMode incu
 QQmlIncubator::Status QQmlDelegateModel::incubationStatus(int index)
 {
     Q_D(QQmlDelegateModel);
+    if (d->m_compositor.count(d->m_compositorGroup) <= index)
+        return QQmlIncubator::Null;
     Compositor::iterator it = d->m_compositor.find(d->m_compositorGroup, index);
     if (!it->inCache())
         return QQmlIncubator::Null;
@@ -1609,7 +1624,7 @@ void QQmlDelegateModelPrivate::itemsRemoved(
         removed[i] = 0;
 
     for (const Compositor::Remove &remove : removes) {
-        for (; cacheIndex < remove.cacheIndex; ++cacheIndex)
+        for (; cacheIndex < remove.cacheIndex && cacheIndex < m_cache.size(); ++cacheIndex)
             incrementIndexes(m_cache.at(cacheIndex), m_groupCount, removed);
 
         for (int i = 1; i < m_groupCount; ++i) {
@@ -1875,6 +1890,9 @@ void QQmlDelegateModel::_q_modelReset()
         d->m_count = d->adaptorModelCount();
 
         const QList<QQmlDelegateModelItem *> cache = d->m_cache;
+        for (QQmlDelegateModelItem *item : cache)
+            item->referenceObject();
+
         for (int i = 0, c = cache.count();  i < c; ++i) {
             QQmlDelegateModelItem *item = cache.at(i);
             // layout change triggered by changing the modelIndex might have
@@ -1886,6 +1904,8 @@ void QQmlDelegateModel::_q_modelReset()
                 item->setModelIndex(-1, -1, -1);
         }
 
+        for (QQmlDelegateModelItem *item : cache)
+            item->releaseObject();
         QVector<Compositor::Remove> removes;
         QVector<Compositor::Insert> inserts;
         if (oldCount)
@@ -2379,6 +2399,15 @@ void QQmlDelegateModelItem::destroyObject()
         data->ownContext = nullptr;
         data->context = nullptr;
     }
+    /* QTBUG-87228: when destroying object at the application exit, the deferred
+     * parent by setting it to QCoreApplication instance if it's nullptr, so
+     * deletion won't work. Not to leak memory, make sure our object has a that
+     * the parent claims the object at the end of the lifetime. When not at the
+     * application exit, normal event loop will handle the deferred deletion
+     * earlier.
+     */
+    if (object->parent() == nullptr)
+        object->setParent(QCoreApplication::instance());
     object->deleteLater();
 
     if (attached) {

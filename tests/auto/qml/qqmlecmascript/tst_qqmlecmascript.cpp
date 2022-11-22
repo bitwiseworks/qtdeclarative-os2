@@ -239,6 +239,8 @@ private slots:
     void eval();
     void function();
     void topLevelGeneratorFunction();
+    void generatorCrashNewProperty();
+    void generatorCallsGC();
     void qtbug_10696();
     void qtbug_11606();
     void qtbug_11600();
@@ -382,7 +384,8 @@ private slots:
     void semicolonAfterProperty();
     void hugeStack();
     void variantConversionMethod();
-
+    void proxyIteration();
+    void proxyHandlerTraps();
     void gcCrashRegressionTest();
 
 private:
@@ -6488,6 +6491,30 @@ void tst_qqmlecmascript::topLevelGeneratorFunction()
     QCOMPARE(it.property("next").callWithInstance(it).property("value").toInt(), 1);
 }
 
+// QTBUG-91491
+void tst_qqmlecmascript::generatorCrashNewProperty()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("generatorCrashNewProperty.qml"));
+
+    QScopedPointer<QObject> o(component.create());
+
+    QVERIFY2(o != nullptr, qPrintable(component.errorString()));
+
+    QCOMPARE(o->property("a").toInt(), 42);
+    QCOMPARE(o->property("b").toInt(), 12);
+    QCOMPARE(o->property("c").toInt(), 42);
+}
+
+void tst_qqmlecmascript::generatorCallsGC()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("generatorCallsGC.qml"));
+
+    QScopedPointer<QObject> o(component.create()); // should not crash
+    QVERIFY2(o != nullptr, qPrintable(component.errorString()));
+}
+
 // Test the "Qt.include" method
 void tst_qqmlecmascript::include()
 {
@@ -9304,6 +9331,44 @@ void tst_qqmlecmascript::variantConversionMethod()
     QScopedPointer<QObject> o(component.create());
     QVERIFY(o != nullptr);
     QCOMPARE(obj.funcCalled, QLatin1String("QModelIndex"));
+}
+
+void tst_qqmlecmascript::proxyIteration()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("proxyIteration.qml"));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+    QCOMPARE(root->property("sum").toInt(), 6);
+}
+
+void tst_qqmlecmascript::proxyHandlerTraps()
+{
+    const QString expression = QStringLiteral(R"SNIPPET(
+        (function(){
+            const target = {
+                prop: 47
+            };
+            const handler = {
+                getOwnPropertyDescriptor(target, prop) {
+                    return { configurable: true, enumerable: true, value: 47 };
+                }
+            };
+            const proxy = new Proxy(target, handler);
+
+            // QTBUG-88786
+            if (!proxy.propertyIsEnumerable("prop"))
+                throw Error("FAIL: propertyisEnumerable");
+            if (!proxy.hasOwnProperty("prop"))
+                throw Error("FAIL: hasOwnProperty");
+
+            return "SUCCESS";
+        })()
+    )SNIPPET");
+
+    QJSEngine engine;
+    QJSValue value = engine.evaluate(expression);
+    QVERIFY(value.isString() && value.toString() == QStringLiteral("SUCCESS"));
 }
 
 QTEST_MAIN(tst_qqmlecmascript)
